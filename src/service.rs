@@ -286,7 +286,6 @@ impl Service {
                         self.store.ingest(&source, &cursor)?;
                     }
                 }
-                self.store.manage(&path)?;
             }
         }
         if tmux::unreported_pi(&bindings.iter().map(|b| b.bridge.pid).collect::<Vec<_>>())? > 0 {
@@ -326,7 +325,7 @@ impl Service {
                         warning: "Session not saved by Pi yet (or --no-session)".into(),
                         ..Default::default()
                     },
-                    state: ResumeState::Resume,
+                    state: ResumeState::History,
                     note: String::new(),
                     done_revision: 0,
                     done_at: 0,

@@ -414,8 +414,7 @@ fn run(cli: Cli) -> Result<()> {
                 resume || !spec.warning.is_empty() || fresh.warning.is_empty(),
                 "Presence changed: repeat the command and confirm the new situation"
             );
-            fresh.launch()?;
-            service.store.manage(&fresh.file)
+            fresh.launch()
         }
     }
 }

@@ -30,7 +30,6 @@ pub enum Action {
         note: Option<String>,
     },
     Undo(String),
-    Managed(PathBuf),
     Focus(Box<Binding>),
     FocusPane(Box<crate::tmux::PaneIdentity>),
     Prepare(String),
@@ -139,13 +138,6 @@ fn run(
                             .store
                             .undo(&id)
                             .map(|()| "Change undone".into())
-                            .map_err(error),
-                    ),
-                    Action::Managed(file) => Reply::Ack(
-                        service
-                            .store
-                            .manage(&file)
-                            .map(|()| String::new())
                             .map_err(error),
                     ),
                     Action::Focus(binding) => Reply::Ack(

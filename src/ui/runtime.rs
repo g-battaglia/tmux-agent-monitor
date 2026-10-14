@@ -925,9 +925,6 @@ pub fn run(root: std::path::PathBuf, project: Option<String>) -> Result<()> {
                         )?;
                         ratatui::restore();
                         let result = spec.launch();
-                        if result.is_ok() {
-                            runtime.action(Action::Managed(spec.file.clone()));
-                        }
                         terminal = ratatui::init();
                         execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
                         runtime.app.status = result

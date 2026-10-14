@@ -135,8 +135,10 @@ badges, work decisions, presence, and activity are independent:
 [claude][~] [finished]    probable opening; observed turn end
 ```
 
-`[R]` means To resume; `[O]` means a verified Pi opening; `[~]` is a probable
-association. Verification proves identity, not the inferred activity state.
+`[R]` means manually marked To resume (`r` or CLI `reopen`); new or newly
+opened chats are never marked automatically. `[O]` means a verified Pi opening;
+`[~]` is a probable association. Verification proves identity, not the inferred
+activity state.
 Search for a provider or activity word to find matching session rows.
 
 | Key | Action |

@@ -153,11 +153,9 @@ impl Store {
                 .filter(|(_, native)| *native == meta.native_id)
                 .map(|(id, _)| id)
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            let state = if meta.created > source.cutoff {
-                ResumeState::Resume
-            } else {
-                ResumeState::History
-            };
+            // Discovery is not a work decision: only an explicit user action
+            // may mark a conversation To resume, regardless of its creation time.
+            let state = ResumeState::History;
             self.conn.execute("INSERT INTO sessions(id,file,source,native_id,cwd,updated,cursor,state) VALUES(?,?,?,?,?,?,?,?)
                 ON CONFLICT(file) DO UPDATE SET native_id=excluded.native_id,cwd=excluded.cwd,updated=excluded.updated,cursor=excluded.cursor,available=1",
                 params![id,file,source.path.to_string_lossy(),meta.native_id,meta.cwd,meta.updated,serde_json::to_string(cursor)?,serde_json::to_string(&state)?])?;
@@ -220,19 +218,6 @@ impl Store {
             "ambiguous Pi id: use the catalog id to pick the exact file"
         );
         matches.into_iter().next().context("session not found")
-    }
-    /// Enroll a file into To-resume when it genuinely appears after its
-    /// source cutoff. Idempotent, and never overrides an explicit Done.
-    pub fn manage(&self, file: &Path) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET state=? WHERE file=? AND state=?",
-            params![
-                serde_json::to_string(&ResumeState::Resume)?,
-                file.to_string_lossy(),
-                serde_json::to_string(&ResumeState::History)?
-            ],
-        )?;
-        Ok(())
     }
     pub fn change(
         &self,
@@ -327,7 +312,7 @@ impl Store {
 mod tests {
     use super::*;
     #[test]
-    fn historical_copies_stay_history_and_new_sessions_enter_resume() {
+    fn historical_and_new_sessions_stay_history_until_manually_marked() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("state");
         let store = Store::open(&root).unwrap();
@@ -343,6 +328,16 @@ mod tests {
         cursor.metadata.created = source.cutoff + 100;
         store.ingest(&source, &cursor).unwrap();
         assert_eq!(store.resolve("old").unwrap().state, ResumeState::History);
+        assert_eq!(store.resolve("new").unwrap().state, ResumeState::History);
+        store
+            .change("new", None, Some("A note is not a resume decision"))
+            .unwrap();
+        store.ingest(&source, &cursor).unwrap();
+        assert_eq!(store.resolve("new").unwrap().state, ResumeState::History);
+        store
+            .change("new", Some(ResumeState::Resume), None)
+            .unwrap();
+        store.ingest(&source, &cursor).unwrap();
         assert_eq!(store.resolve("new").unwrap().state, ResumeState::Resume);
         let cutoff = source.cutoff;
         drop(store);
@@ -457,14 +452,15 @@ mod tests {
         cursor.metadata.created = source.cutoff - 1;
         store.ingest(&source, &cursor).unwrap();
         assert_eq!(store.list().unwrap()[0].state, ResumeState::History);
-        store.manage(&cursor.metadata.file).unwrap();
+        store
+            .change("pi-native", Some(ResumeState::Resume), None)
+            .unwrap();
         store
             .change("pi-native", Some(ResumeState::Done), Some("next"))
             .unwrap();
         cursor.metadata.revision = 2;
         cursor.metadata.updated = paths::now() + 100;
         store.ingest(&source, &cursor).unwrap();
-        store.manage(&cursor.metadata.file).unwrap();
         let session = store.resolve("pi-native").unwrap();
         assert_eq!(session.state, ResumeState::Done);
         assert!(session.changed_after_done());

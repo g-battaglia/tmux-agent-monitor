@@ -47,13 +47,18 @@ with tempfile.TemporaryDirectory(prefix='am-sessions-') as tmp:
     rows = json.loads(cli('sessions', '--all', '--json').stdout)
     assert len(rows) == 1 and rows[0]['state'] == 'history'
     assert json.loads(cli('sessions', '--json').stdout) == []
-    # Created after the persisted baseline; importing a copied old file isn't enough.
+    # Even chats created after discovery stay unmarked until an explicit action.
     future = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=1)).isoformat()
     session(source / 'new.jsonl', 'new-native', 'New session', future)
-    rows = json.loads(cli('sessions', '--json').stdout)
-    assert len(rows) == 1 and rows[0]['state'] == 'resume'
-    identity = rows[0]['id']
+    assert json.loads(cli('sessions', '--json').stdout) == []
+    rows = json.loads(cli('sessions', '--all', '--json').stdout)
+    saved = next(r for r in rows if r['metadata']['native_id'] == 'new-native')
+    assert saved['state'] == 'history'
+    identity = saved['id']
     cli('note', identity, 'Persistent next step')
+    assert json.loads(cli('sessions', '--json').stdout) == []
+    cli('reopen', identity)
+    assert json.loads(cli('sessions', '--json').stdout)[0]['state'] == 'resume'
     cli('done', identity)
     assert json.loads(cli('sessions', '--json').stdout) == []
     cli('undo', identity)
@@ -96,8 +101,11 @@ with tempfile.TemporaryDirectory(prefix='am-sessions-') as tmp:
     fake_bin.mkdir()
     fake_ps = fake_bin / 'ps'
     fake_ps.write_text(f'''#!{sys.executable}
-import os
+import os, sys
 from pathlib import Path
+if '-p' in sys.argv:
+    print(f"Mon Jan 1 00:00:00 2024 {{os.getuid()}}")
+    sys.exit(0)
 counter = Path(os.environ['AM_TEST_COUNTER'])
 changed = os.environ.get('AM_TEST_REUSE') and counter.exists()
 start = '00:00:01' if changed else '00:00:00'
@@ -133,6 +141,41 @@ else: raise AssertionError('non-read-only command: ' + repr(args))
     assert result.returncode != 0 and 'identity changed' in result.stderr
     assert [json.loads(line)['state'] for line in result.stdout.splitlines()] == ['working']
     assert not diagnostic_state.exists(), 'watching must not initialize SQLite/state'
+    # Verified Pi presence must not promote saved History or unsaved chats to [R].
+    presence_dir = state / 'presence'
+    presence_dir.mkdir(mode=0o700)
+    record = presence_dir / 'fixture.json'
+    bridge = dict(version=1, nonce='fixture', generation=1, pid=1002,
+                  process_start='Mon Jan 1 00:00:00 2024', native_id='old-native',
+                  file=str(source / 'old.jsonl'), cwd=str(root), name='Historic onboarding',
+                  leaf=None, socket='/fake/socket', pane='%23', seen=int(time.time() * 1000))
+
+    def write_bridge():
+        record.write_text(json.dumps(bridge))
+        record.chmod(0o600)
+
+    def live_cli(*args):
+        return subprocess.run([str(binary), '--data-dir', str(state), *args],
+                              env=watch_env, capture_output=True, text=True, check=True, timeout=15)
+
+    write_bridge()
+    opened = json.loads(live_cli('sessions', '--open', '--json').stdout)['sessions']
+    saved = next(s for s in opened if s['metadata']['native_id'] == 'old-native')
+    assert saved['bindings'] and saved['state'] == 'history'
+    bridge.update(native_id='unsaved-native', file=None, name='Unsaved chat')
+    write_bridge()
+    opened = json.loads(live_cli('sessions', '--open', '--json').stdout)['sessions']
+    unsaved = next(s for s in opened if s['id'] == 'live-fixture')
+    assert unsaved['bindings'] and unsaved['state'] == 'history'
+    bridge.update(native_id='new-native', file=str(source / 'new.jsonl'), name='New session')
+    write_bridge()
+    for expected in ('resume', 'done'):
+        opened = json.loads(live_cli('sessions', '--open', '--json').stdout)['sessions']
+        assert next(s for s in opened if s['id'] == identity)['state'] == expected
+        if expected == 'resume':
+            live_cli('done', identity)
+    live_cli('undo', identity)
+    record.unlink()
     bad = subprocess.run([str(binary), '--data-dir', str(state), 'agent', 'explain',
                           '--file', str(screen), '--agent', 'bogus'],
                          env=env, capture_output=True, text=True, timeout=15)
