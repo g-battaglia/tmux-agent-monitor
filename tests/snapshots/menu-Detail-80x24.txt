@@ -1,9 +1,8 @@
 ╭ Search the page text ────────────────────────────────────────────────────────╮
 │Text to find…  / or Ctrl-f                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭ All · 5 ─────────────────────╮╭ Acme Website / website-redesign ─────────────╮
-│›╭ Conversation actions ────────────────────────────────────────────────────╮ │
-│ │ [pi] To resume · Acme Website                                            │ │
+╭ ╭ Conversation actions ────────────────────────────────────────────────────╮─╮
+│›│ [pi] To resume · Acme Website                                            │ │
 │ │ website-redesign                                                         │ │
 │ │ Categories       Catalog 1/1                                             │ │
 │ │   Find         │ › Refresh catalog                                  [R]  │ │
@@ -12,6 +11,7 @@
 │ │   Folders      │                                                         │ │
 │ │   Navigate     │                                                         │ │
 │ │ ▸ Catalog      │                                                         │ │
+│ │   Notifications│                                                         │ │
 │ │                │                                                         │ │
 │ │ ──────────────────────────────────────────────────────────────────────── │ │
 │ │ Re-read names, conversations, and openings without starting agents.      │ │
@@ -20,5 +20,5 @@
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-r to resume   j/k scroll   [ ] pages   / search   z expand   ? actions
-
+a alerts  A all  r to resume  j/k scroll  [ ] pages  z expand  ? actions
+                                                                      Alerts off

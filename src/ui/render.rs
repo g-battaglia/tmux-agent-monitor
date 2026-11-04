@@ -133,10 +133,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let hints = match app.panel {
         Panel::Projects if area.width < 65 => "Space fold  v layout  s sort  ? actions",
         Panel::Projects => "Space fold  E/C all  v tree/flat  s sort  Enter pick  ? actions",
-        Panel::Sessions if area.width < 65 => "r to resume  Enter open  ? actions",
-        Panel::Sessions => "r to resume   d done   Enter open   f view   / search   ? actions",
-        Panel::Detail if area.width < 65 => "r to resume  j/k scroll  ? actions",
-        Panel::Detail => "r to resume   j/k scroll   [ ] pages   / search   z expand   ? actions",
+        Panel::Sessions if area.width < 65 => "a alerts  r to resume  Enter  ? actions",
+        Panel::Sessions => "a alerts  A all  r to resume  d done  Enter open  f view  ? actions",
+        Panel::Detail if area.width < 65 => "a alerts  r to resume  j/k  ? actions",
+        Panel::Detail => "a alerts  A all  r to resume  j/k scroll  [ ] pages  z expand  ? actions",
     };
     if area.height > 1 {
         frame.render_widget(
@@ -156,9 +156,31 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 .map(|s| paths::line(s))
                 .unwrap_or_default()
         };
+        let alerts = if !app.notifications.preferences.enabled {
+            "Alerts off"
+        } else if app.notifications.owner {
+            "Alerts on"
+        } else {
+            "Alerts on*"
+        };
+        let alerts_width = (alerts.len() as u16).min(area.width);
         frame.render_widget(
             Paragraph::new(status).style(Style::new().fg(theme.warning)),
-            Rect::new(area.x, area.bottom() - 1, area.width, 1),
+            Rect::new(
+                area.x,
+                area.bottom() - 1,
+                area.width.saturating_sub(alerts_width + 1),
+                1,
+            ),
+        );
+        frame.render_widget(
+            Paragraph::new(alerts).style(Style::new().fg(theme.muted)),
+            Rect::new(
+                area.right() - alerts_width,
+                area.bottom() - 1,
+                alerts_width,
+                1,
+            ),
         );
     }
     if let Some(menu) = &app.command_menu {
@@ -236,7 +258,8 @@ pub fn menu_groups_area(area: Rect, count: usize) -> Rect {
         return Rect::default();
     }
     let body = menu_list_area(area, count);
-    Rect::new(outer.x + 2, body.y, 14, body.height)
+    // Thirteen cells for "Notifications", plus the two-cell selection marker.
+    Rect::new(outer.x + 2, body.y, 15, body.height)
 }
 fn clipped(text: &str, width: u16) -> String {
     let text = paths::line(text);
@@ -560,6 +583,11 @@ fn sessions(frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
                     Span::raw(format!("[{}]", s.metadata.provider.label())),
                     Span::styled(resume, Style::new().fg(theme.focus).bold()),
                     Span::raw(mark),
+                    Span::raw(if app.notifications.session_enabled(s) {
+                        "[N]"
+                    } else {
+                        "[-]"
+                    }),
                     Span::styled(
                         s.live_activity()
                             .map(|a| format!(" [{}]", a.label()))
@@ -719,7 +747,11 @@ fn detail(frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
             pane.activity_evidence.as_ref(),
         ) {
             lines.push(Line::styled(
-                crate::activity::describe(provider, state, evidence),
+                format!(
+                    "{}: {}",
+                    paths::line(&pane.target),
+                    crate::activity::describe(provider, state, evidence)
+                ),
                 Style::new().fg(theme.muted),
             ));
         }
@@ -956,7 +988,7 @@ mod tests {
             terminal.draw(|f| draw(f, &app)).unwrap();
             let text = snapshot_text(terminal.backend().buffer(), 160, 40);
             for label in ["working", "finished", "waiting", "error", "unknown"] {
-                assert!(text.contains(&format!("[pi][R][~] [{label}]")));
+                assert!(text.contains(&format!("[pi][R][~][N] [{label}]")));
             }
             if no_color {
                 assert!(
@@ -1282,7 +1314,11 @@ mod tests {
                 let mut app = fixture();
                 app.panel = panel;
                 let mut menu = super::super::menu::CommandMenu::new(&app);
-                menu.selected = menu.actions.len() - 1;
+                menu.selected = menu
+                    .actions
+                    .iter()
+                    .position(|action| action.key == crossterm::event::KeyCode::Char('R'))
+                    .unwrap();
                 app.command_menu = Some(menu);
                 let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
                 terminal.draw(|f| draw(f, &app)).unwrap();
@@ -1425,6 +1461,42 @@ mod tests {
                 }
                 assert_eq!(text, std::fs::read_to_string(path).unwrap());
             }
+        }
+    }
+    #[test]
+    fn alert_badges_master_and_menu_remain_legible_without_color() {
+        for (w, h) in [(40, 12), (80, 24), (120, 32)] {
+            let mut app = fixture();
+            app.no_color = true;
+            app.notifications.preferences.enabled = true;
+            app.notifications.owner = true;
+            app.notifications
+                .preferences
+                .sessions
+                .insert("fixture-0".into(), false);
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+            terminal.draw(|f| draw(f, &app)).unwrap();
+            let text = snapshot_text(terminal.backend().buffer(), w, h);
+            assert!(text.contains("[pi][R][-]"));
+            assert!(text.contains("[pi][R][N]"));
+            assert!(text.contains("Alerts on"));
+            let mut menu = super::super::menu::CommandMenu::new(&app);
+            let group = menu
+                .groups()
+                .iter()
+                .position(|group| *group == "Notifications")
+                .unwrap();
+            menu.choose_group(group);
+            assert_eq!(
+                menu.actions[menu.selected].label,
+                "Enable session notifications"
+            );
+            app.command_menu = Some(menu);
+            terminal.draw(|f| draw(f, &app)).unwrap();
+            let text = snapshot_text(terminal.backend().buffer(), w, h);
+            assert!(text.contains("Notifications"));
+            assert!(text.contains("[a]"));
+            assert!(text.contains("[A]"));
         }
     }
     #[test]

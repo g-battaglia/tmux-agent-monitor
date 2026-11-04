@@ -1,12 +1,12 @@
 ╭ Search sessions ─────────────────────╮
 │N╭ Session actions ─────────────────╮ │
 ╰─│ [pi] To resume · Acme Website    │─╯
-╭ │ Catalog ←→/Tab 5/5               │─╮
-│›│ › Refresh catalog           [R]  │s│
-│ │                                  │n│
-│ │ ──────────────────────────────── │l│
-│ │ Re-read names, conversations,    │ │
-│ │ and openings without starting    │s│
+╭ │ Catalog ←→/Tab 5/6               │─╮
+│›│ › Refresh catalog           [R]  │e│
+│ │                                  │t│
+│ │ ──────────────────────────────── │g│
+│ │ Re-read names, conversations,    │t│
+│ │ and openings without starting    │o│
 ╰─│ Tab groups  ↑↓ move  ↵ run  Esc  │─╯
-r ╰──────────────────────────────────╯
-
+a ╰──────────────────────────────────╯s
+                              Alerts off

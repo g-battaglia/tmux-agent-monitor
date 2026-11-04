@@ -19,6 +19,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Fresh presence sample plus one-shot completions. Catalog-only readers never
+/// deliver desktop notifications; the interactive worker owns that side effect.
+pub struct CatalogPoll {
+    pub catalog: Catalog,
+    pub completions: Vec<tmux::PaneIdentity>,
+}
+
 /// Opened state root plus SQLite store.
 pub struct Service {
     pub root: PathBuf,
@@ -218,6 +225,18 @@ impl Service {
         Ok(indexer.warnings)
     }
     pub fn catalog(&self) -> Result<Catalog> {
+        Ok(self.poll_catalog()?.catalog)
+    }
+    pub fn poll_catalog(&self) -> Result<CatalogPoll> {
+        let result = self.sample_catalog();
+        if result.is_err() {
+            // A partial failed refresh must not bridge working/idle history
+            // across an observation gap or replay a partially built event batch.
+            *self.activity.borrow_mut() = activity::ActivityTracker::default();
+        }
+        result
+    }
+    fn sample_catalog(&self) -> Result<CatalogPoll> {
         let mut warnings = vec![];
         let mut panes = match tmux::discover(&tmux::TmuxConfig::default()) {
             Ok(p) => p,
@@ -236,7 +255,7 @@ impl Service {
                 vec![]
             }
         };
-        attach_activity(
+        let completions = attach_activity(
             &mut panes,
             &bindings,
             &mut self.activity.borrow_mut(),
@@ -358,11 +377,14 @@ impl Service {
         }
         associate_probable(&mut sessions, &unbound);
         append_live_panes(&mut sessions, &unbound);
-        Ok(Catalog {
-            sessions,
-            unbound,
-            warnings,
-            scanning: false,
+        Ok(CatalogPoll {
+            catalog: Catalog {
+                sessions,
+                unbound,
+                warnings,
+                scanning: false,
+            },
+            completions,
         })
     }
     pub fn detail(&self, target: &str, leaf: Option<&str>, tools: bool) -> Result<Conversation> {
@@ -456,7 +478,7 @@ fn attach_activity(
     bindings: &[Binding],
     tracker: &mut activity::ActivityTracker,
     now_ms: u64,
-) {
+) -> Vec<tmux::PaneIdentity> {
     attach_activity_sampled(panes, bindings, tracker, now_ms, |pane| {
         let tail = paths::clean(&tmux::capture_pane(&pane.socket, &pane.pane, 80)?);
         let signature = (!tail.trim().is_empty()).then(|| pi::hash(tail.as_bytes()));
@@ -466,7 +488,7 @@ fn attach_activity(
             &tail,
         );
         Ok((state, evidence, signature))
-    });
+    })
 }
 fn attach_activity_sampled(
     panes: &mut [tmux::PaneIdentity],
@@ -480,8 +502,9 @@ fn attach_activity_sampled(
         activity::MatchEvidence,
         Option<u64>,
     )>,
-) {
+) -> Vec<tmux::PaneIdentity> {
     let mut active = std::collections::HashSet::new();
+    let mut completions = Vec::new();
     for pane in panes {
         let binding = bindings.iter().find(|b| {
             b.pane
@@ -503,7 +526,9 @@ fn attach_activity_sampled(
             })
             .unwrap_or_default();
         let key = activity::pane_key(pane, &generation);
-        active.insert(key.clone());
+        if active.len() >= 4096 || !active.insert(key.clone()) {
+            continue;
+        }
         let (state, mut evidence, signature) = sample(pane).unwrap_or_else(|_| {
             (
                 activity::AgentActivity::Unknown,
@@ -515,11 +540,15 @@ fn attach_activity_sampled(
             )
         });
         evidence.sampled_at = paths::now();
-        let (state, evidence) = tracker.observe(&key, state, evidence, signature, now_ms);
-        pane.activity = Some(state);
-        pane.activity_evidence = Some(evidence);
+        let sample = tracker.observe_sample(&key, state, evidence, signature, now_ms);
+        pane.activity = Some(sample.state);
+        pane.activity_evidence = Some(sample.evidence);
+        if sample.finished_now {
+            completions.push(pane.clone());
+        }
     }
     tracker.retain(&active);
+    completions
 }
 
 /// Reattach ephemeral presence to fresh store rows between full catalog
@@ -831,7 +860,25 @@ mod tests {
         attach_activity_sampled(&mut panes, &bindings, &mut tracker, 0, sample("⠼ Working"));
         assert_eq!(panes[0].activity, Some(activity::AgentActivity::Working));
         attach_activity_sampled(&mut panes, &bindings, &mut tracker, 2000, sample(">"));
-        attach_activity_sampled(&mut panes, &bindings, &mut tracker, 4000, sample(">"));
+        let completed =
+            attach_activity_sampled(&mut panes, &bindings, &mut tracker, 4000, sample(">"));
+        assert_eq!(completed.len(), 1);
+        assert_eq!(
+            completed[0].activity,
+            Some(activity::AgentActivity::Finished)
+        );
+        assert!(
+            !completed[0]
+                .activity_evidence
+                .as_ref()
+                .unwrap()
+                .observation_key
+                .is_empty()
+        );
+        assert!(
+            attach_activity_sampled(&mut panes, &bindings, &mut tracker, 4500, sample(">"))
+                .is_empty()
+        );
         assert_eq!(panes[0].activity, Some(activity::AgentActivity::Finished));
         bindings[0].pane = Some(panes[0].clone());
         let mut saved = session();
@@ -851,7 +898,10 @@ mod tests {
         });
         assert_eq!(saved.live_activity(), Some(activity::AgentActivity::Mixed));
         bindings[0].bridge.generation = 2;
-        attach_activity_sampled(&mut panes, &bindings, &mut tracker, 6000, sample(">"));
+        assert!(
+            attach_activity_sampled(&mut panes, &bindings, &mut tracker, 6000, sample(">"))
+                .is_empty()
+        );
         assert_eq!(panes[0].activity, Some(activity::AgentActivity::Idle));
         attach_activity_sampled(&mut panes, &bindings, &mut tracker, 8000, |_| {
             anyhow::bail!("fake capture failure")

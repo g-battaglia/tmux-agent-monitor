@@ -218,6 +218,8 @@ else: raise AssertionError('non-read-only command: ' + repr(args))
     assert session_details['session']['agent'] == 'pi'
     assert session_details['session']['source_file'] == str((source / 'new.jsonl').resolve())
     assert 'Folder:' in cli('details', identity).stdout
+    # Query/watch commands must not even elect or construct a desktop sender.
+    assert not (state / 'notifications.lock').exists()
     # Stale project/view preferences must not override All projects / Open startup.
     with sqlite3.connect(state / 'sessions.db') as db:
         db.execute('INSERT OR REPLACE INTO preferences VALUES(?,?)', ('project', str(root)))
@@ -279,6 +281,17 @@ else: raise AssertionError('non-read-only command: ' + repr(args))
         assert '▾'.encode() in drain(0.3)
         os.write(master, b's2')
         drain(0.2)
+        # There are no live panes in this PTY fixture, so no desktop event can
+        # fire. Exercise persistence/ack without requesting a test notification.
+        os.write(master, b'aA')
+        drain(0.4)
+        with sqlite3.connect(state / 'sessions.db') as db:
+            assert db.execute('SELECT value FROM preferences WHERE key=?', ('notifications.enabled',)).fetchone() == ('true',)
+            assert db.execute('SELECT value FROM preferences WHERE key=?', ('notifications.session.' + identity,)).fetchone() == ('false',)
+        os.write(master, b'A')
+        drain(0.3)
+        with sqlite3.connect(state / 'sessions.db') as db:
+            assert db.execute('SELECT value FROM preferences WHERE key=?', ('notifications.enabled',)).fetchone() == ('false',)
         os.write(master, b'nNote from the TUI\r')
         drain(0.8)
         os.write(master, b'd')
@@ -306,7 +319,7 @@ else: raise AssertionError('non-read-only command: ' + repr(args))
         process.wait(timeout=3)
         assert process.returncode == 0
         assert time.monotonic() - start < 1
-        print('PASS: four-provider sessions, details, Open startup, project folding/flat/sorting, categorized menu, live-state diagnostics, rename compatibility, notes, undo, PTY resize and quit')
+        print('PASS: four-provider sessions, details, Open startup, project folding/flat/sorting, categorized menu, notification settings, live-state diagnostics, rename compatibility, notes, undo, PTY resize and quit')
     finally:
         if process.poll() is None:
             process.kill()

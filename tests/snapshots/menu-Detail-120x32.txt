@@ -5,17 +5,17 @@
 │› All projects  5                             ││To resume    Presence unverified                                      │
 │  ▾ Repo/                                    5││Acme Website                                                          │
 │  └─ Acme Website                            5││Last exchange: —                                                      │
-│                                              ││                                                                      │
 │                  ╭ Conversation actions ──────────────────────────────────────────────────────────╮                  │
 │                  │ [pi] To resume · Acme Website                                                  │                  │
 │                  │ website-redesign                                                               │                  │
-╰ /repo ───────────│ Categories       Catalog 1/1                                                   │                  │
-╭ All · 5 ─────────│   Find         │ › Refresh catalog                                        [R]  │                  │
-│› [pi][R] Acme Web│   Session      │                                                               │                  │
-│  [pi][R] Acme Web│   Reading      │                                                               │                  │
-│  [pi][R] Acme Web│   Folders      │                                                               │                  │
-│  [pi][R] Acme Web│   Navigate     │                                                               │                  │
-│  [pi][R] Acme Web│ ▸ Catalog      │                                                               │                  │
+│                  │ Categories       Catalog 1/1                                                   │                  │
+╰ /repo ───────────│   Find         │ › Refresh catalog                                        [R]  │                  │
+╭ All · 5 ─────────│   Session      │                                                               │                  │
+│› [pi][R][N] Acme │   Reading      │                                                               │                  │
+│  [pi][R][N] Acme │   Folders      │                                                               │                  │
+│  [pi][R][N] Acme │   Navigate     │                                                               │                  │
+│  [pi][R][N] Acme │ ▸ Catalog      │                                                               │                  │
+│  [pi][R][N] Acme │   Notifications│                                                               │                  │
 │                  │                │                                                               │                  │
 │                  │ ────────────────────────────────────────────────────────────────────────────── │                  │
 │                  │ Re-read names, conversations, and openings without starting agents.            │                  │
@@ -28,5 +28,5 @@
 │                                              ││                                                                      │
 │                                              ││                                                                      │
 ╰──────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────╯
-r to resume   j/k scroll   [ ] pages   / search   z expand   ? actions
-
+a alerts  A all  r to resume  j/k scroll  [ ] pages  z expand  ? actions
+                                                                                                              Alerts off

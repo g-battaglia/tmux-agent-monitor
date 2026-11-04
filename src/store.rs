@@ -302,6 +302,12 @@ impl Store {
             })
             .optional()?)
     }
+    /// Read a namespace once per worker tick, never once per rendered row.
+    pub fn prefixed_preferences(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        Ok(self.conn.prepare("SELECT key,value FROM preferences WHERE substr(key,1,length(?1))=?1 ORDER BY key LIMIT 4097")?
+            .query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
     pub fn set_preference(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute("INSERT INTO preferences(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,value])?;
         Ok(())

@@ -20,6 +20,8 @@ pub struct CommandMenu {
     pub subtitle: String,
     pub notice: Option<String>,
     pub target: Option<String>,
+    pub alert_target: Option<crate::notifications::Target>,
+    pub alert_enabled: bool,
     pub actions: Vec<MenuAction>,
     pub selected: usize,
 }
@@ -52,6 +54,12 @@ impl CommandMenu {
                 .unwrap_or_else(|| "No session selected".into()),
             notice: None,
             target: app.selected.clone(),
+            alert_target: app
+                .current()
+                .map(crate::notifications::Target::from_session),
+            alert_enabled: app
+                .current()
+                .is_some_and(|s| app.notifications.session_enabled(s)),
             actions: vec![],
             selected: 0,
         };
@@ -260,6 +268,31 @@ impl CommandMenu {
             "Re-read names, conversations, and openings without starting agents.",
             true,
         );
+        // Append the new category so established keyboard/mouse category order
+        // remains intact for existing tmux workflows.
+        if app.panel != Panel::Projects {
+            menu.add(
+                "Notifications",
+                if menu.alert_enabled {
+                    "Disable session notifications"
+                } else {
+                    "Enable session notifications"
+                },
+                "a",
+                KeyCode::Char('a'),
+                "Turn-end desktop alerts for this session; the global switch still applies.",
+                menu.alert_target
+                    .as_ref()
+                    .is_some_and(|target| app.notifications.can_change_target(target)),
+            );
+        }
+        menu.add(
+            "Notifications",
+            if app.notifications.preferences.enabled { "Disable all notifications" } else { "Enable all notifications" },
+            "A", KeyCode::Char('A'),
+            "Pause or enable desktop alerts while this monitor stays open. Individual settings are preserved.",
+            true,
+        );
         menu.explain_unavailable(app);
         let initial = match app.panel {
             Panel::Projects => "Project",
@@ -314,6 +347,18 @@ impl CommandMenu {
                 continue;
             }
             a.disabled_reason = match a.key {
+                KeyCode::Char('a')
+                    if self
+                        .alert_target
+                        .as_ref()
+                        .is_some_and(|target| target.available() && target.session.is_none())
+                        && !app.notifications.owner =>
+                {
+                    "Temporary alerts are managed by the sending TUI instance; use its controls."
+                }
+                KeyCode::Char('a') if app.current().is_some() => {
+                    "Wait for a sampled process identity before changing live alerts."
+                }
                 KeyCode::Char('n' | 'd' | 'r' | 'u') if live => {
                     "Saved session required for notes and decisions."
                 }

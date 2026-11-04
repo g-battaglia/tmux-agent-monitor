@@ -50,6 +50,8 @@ The boundary is deliberate:
   histories, without manually registering tasks or workspaces.
 - **Live activity:** show `working`, `finished`, `idle`, `blocked`, `waiting`,
   `error`, `unknown`, or `mixed`, with inspectable detection evidence.
+- **Optional desktop alerts:** one notification per observed turn end, with a
+  global switch and per-session/terminal settings. No daemon or automatic Done.
 - **Project navigation:** foldable folder tree, flat layout, alphabetical or
   latest-saved-update ordering, and project/session/text search.
 - **Conversation inspection:** paginated previews, branch selection, optional
@@ -131,8 +133,8 @@ The three panels are **Projects**, **Sessions**, and **Preview**. Provider
 badges, work decisions, presence, and activity are independent:
 
 ```text
-[pi][R][O] [working]       verified opening; marked To resume
-[claude][~] [finished]    probable opening; observed turn end
+[pi][R][O][N] [working]       verified opening; alerts allowed for this session
+[claude][~][-] [finished]    probable opening; session alerts muted
 ```
 
 `[R]` means manually marked To resume (`r` or CLI `reopen`); new or newly
@@ -153,6 +155,7 @@ Search for a provider or activity word to find matching session rows.
 | `/`, `Ctrl-f`, search-bar click | Search the active panel |
 | `r` / `d` | Mark To resume / Done |
 | `n` / `u` | Edit next-step note / undo |
+| `a` / `A` | Toggle selected session alerts / all desktop alerts |
 | `o` / `i` | Open panes / project or session Details |
 | `z`, `[` / `]`, `b` / `t` | Expanded preview, pages, branches, tool output |
 | `gg`, `G`, `Ctrl-d/u` | Ends / half-page scrolling |
@@ -232,6 +235,10 @@ session-generation changes, missing panes, errors, and capture failures reset
 completion inference. Unmatched known-agent output can fall back to idle;
 Codex without a title signal can remain unknown.
 
+Session Details also identifies each opening, its time in the observed state
+at the latest sample, and the sample timestamp. These timings are memory-only;
+there are no progress percentages or estimates of remaining work.
+
 Inspect rule provenance or watch transitions without opening the catalog:
 
 ```sh
@@ -256,6 +263,57 @@ exported variable:
 ```sh
 TMUX_AGENT_MONITOR_AGENT=codex fence -- codex
 ```
+
+## Optional desktop notifications
+
+Notifications are **off initially**. Press `A` to enable them while the monitor
+is running; use `a` in Sessions or Preview to mute/unmute the selected session.
+Both commands are also in **? → Notifications**. `[N]` means the individual
+setting allows alerts and `[-]` means it is muted; the separate **Alerts on/off**
+footer shows the global switch. Turning an individual setting on never silently
+enables the global switch. `i` shows the backend, preference scope and diagnostic.
+
+- A notification means **an observed turn appears finished**, not that its task
+  succeeded. Notes, To resume, Done and their undo history are untouched.
+- Alerts cover all recognized openings, regardless of project, search or view.
+  An observed working → settled idle transition produces one alert, typically
+  after a few seconds. Existing idle terminals, closed processes, errors,
+  approval prompts and questions do not produce completion alerts. Short turns
+  between samples may be missed.
+- Saved-session preferences persist in the private catalog and apply to all
+  openings of that session, including future reopenings. Live terminals without
+  a saved identity use memory-only preferences for that exact process/session
+  generation, never a reused pane number. An explicit saved-session toggle
+  aligns its currently known openings. A temporary override made before history
+  association stays effective for that opening until then.
+- Muting globally preserves individual settings. Enabling/re-enabling does not
+  replay old completions. Pending alerts are cancelled when settings change;
+  already submitted desktop notifications cannot be withdrawn.
+- Multiple TUI instances sharing a data directory elect one desktop sender;
+  `Alerts on*` means this instance is not the sender or ownership is unavailable.
+  Saved settings synchronize on presence ticks; temporary live-terminal settings
+  belong to that TUI run. Use the sending instance for temporary overrides.
+  Separate data directories remain independent.
+
+**macOS:** uses the built-in `/usr/bin/osascript`. Allow notifications for the
+system's script notification sender in System Settings if requested.
+**Linux:** uses optional `notify-send` (usually provided by `libnotify` tools)
+with a desktop notification service/session bus. The monitor never installs it.
+Missing helpers, errors or timeouts leave monitoring working and are reported
+in Details; there are no automatic retries of the same event. A helper accepting
+an alert does not prove it was displayed: OS permissions, Focus/Do Not Disturb
+and desktop policy still apply. No explicit sound or click action is requested.
+
+The TUI process must remain open, including when tmux is detached. `q` ends
+monitoring and notifications; no daemon is left behind. Notifications appear
+on the **machine running the monitor**, not automatically on an SSH client.
+Headless CLI commands (including `agent explain --watch`) never send alerts.
+
+Payloads contain only bounded provider, project-folder and tmux target metadata,
+never transcript text, conversation titles, captured screens or next-step notes.
+Desktop delivery runs on a separate bounded thread so a slow notification helper
+cannot stall input or rendering. A full queue drops alerts with a diagnostic,
+not an unbounded backlog.
 
 ## Optional Pi identity verification
 

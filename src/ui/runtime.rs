@@ -59,7 +59,13 @@ impl Runtime {
     /// Queue one worker operation. Writes are never applied locally;
     /// the status line only says "saved" on the worker's own ack.
     fn action(&mut self, action: Action) {
-        let writing = matches!(action, Action::Change { .. } | Action::Undo(_));
+        let writing = matches!(
+            action,
+            Action::Change { .. }
+                | Action::Undo(_)
+                | Action::SetNotifications(_)
+                | Action::SetSessionNotifications { .. }
+        );
         if self.worker.actions.try_send(action).is_err() {
             self.app.status = "Operation not sent: queue is busy, retry".into();
         } else if writing {
@@ -322,6 +328,26 @@ impl Runtime {
                     self.app.select(0);
                 }
             }
+            KeyCode::Char('A') => self.action(Action::SetNotifications(
+                !self.app.notifications.preferences.enabled,
+            )),
+            KeyCode::Char('a') if self.app.panel != Panel::Projects => {
+                if let Some(session) = self.app.current() {
+                    let target = crate::notifications::Target::from_session(session);
+                    if self.app.notifications.can_change_target(&target) {
+                        let enabled = !self.app.notifications.target_enabled(&target);
+                        self.action(Action::SetSessionNotifications { target, enabled });
+                    } else {
+                        self.app.status = if target.available() {
+                            "Temporary alerts are managed by the sending TUI instance; use its controls"
+                        } else {
+                            "Wait for a sampled process identity before changing live alerts"
+                        }.into();
+                    }
+                } else {
+                    self.app.status = "Select a session first".into();
+                }
+            }
             KeyCode::Char('f') => {
                 self.dialog = Some(Dialog::Views(
                     View::ALL
@@ -359,7 +385,17 @@ impl Runtime {
                         .map(|s| crate::details::Details::session(&self.app.catalog, s))
                 };
                 if let Some(details) = details {
-                    self.dialog = Some(Dialog::Info(details.text(), 0));
+                    let selected = if self.app.panel == Panel::Projects {
+                        None
+                    } else {
+                        self.app.current()
+                    };
+                    let text = format!(
+                        "{}\n\n{}",
+                        details.text(),
+                        self.app.notifications.details(selected)
+                    );
+                    self.dialog = Some(Dialog::Info(text, 0));
                 }
             }
             KeyCode::Char('?') => {
@@ -525,7 +561,8 @@ impl Runtime {
                         if !command.enabled {
                             menu.notice = Some(command.disabled_reason.into());
                             true
-                        } else if self.app.panel != Panel::Projects
+                        } else if command.key != KeyCode::Char('A')
+                            && self.app.panel != Panel::Projects
                             && menu.target != self.app.selected
                         {
                             self.app.status = "Selection changed: reopen the commands".into();
@@ -534,7 +571,16 @@ impl Runtime {
                             let code = command.key;
                             self.app.modal = None;
                             self.app.command_menu = None;
-                            self.key(KeyEvent::new(code, KeyModifiers::NONE), 24);
+                            if code == KeyCode::Char('a') {
+                                if let Some(target) = &menu.alert_target {
+                                    self.action(Action::SetSessionNotifications {
+                                        target: target.clone(),
+                                        enabled: !menu.alert_enabled,
+                                    });
+                                }
+                            } else {
+                                self.key(KeyEvent::new(code, KeyModifiers::NONE), 24);
+                            }
                             false
                         }
                     } else {
@@ -856,6 +902,7 @@ pub fn run(root: std::path::PathBuf, project: Option<String>) -> Result<()> {
             while let Ok(reply) = runtime.worker.replies.try_recv() {
                 dirty = true;
                 match reply {
+                    Reply::Notifications(state) => runtime.app.notifications = state,
                     Reply::Catalog(catalog) => {
                         if let Some(project) = runtime.app.project.clone() {
                             let paths = catalog
@@ -1085,6 +1132,70 @@ mod tests {
             bindings: vec![],
             probable: vec![],
         }
+    }
+    #[test]
+    fn alert_shortcuts_freeze_targets_and_do_not_optimistically_change_state() {
+        let mut runtime = fixture();
+        let (actions, requests) = std::sync::mpsc::sync_channel(16);
+        runtime.worker.actions = actions;
+        let press = |runtime: &mut Runtime, code| {
+            runtime.key(KeyEvent::new(code, KeyModifiers::NONE), 24);
+        };
+        press(&mut runtime, KeyCode::Char('a'));
+        assert!(requests.try_recv().is_err());
+        press(&mut runtime, KeyCode::Char('A'));
+        assert!(matches!(
+            requests.try_recv().unwrap(),
+            Action::SetNotifications(true)
+        ));
+        assert!(!runtime.app.notifications.preferences.enabled);
+        runtime.app.apply(Catalog {
+            sessions: vec![session("one"), session("two")],
+            ..Default::default()
+        });
+        press(&mut runtime, KeyCode::Char('a'));
+        runtime.app.select(1);
+        assert!(
+            matches!(requests.try_recv().unwrap(), Action::SetSessionNotifications { target, enabled: false } if target.session.as_deref() == Some("one"))
+        );
+        assert_eq!(runtime.app.current().unwrap().state, ResumeState::Resume);
+        assert!(runtime.app.notifications.preferences.sessions.is_empty());
+        runtime.app.editing_search = true;
+        press(&mut runtime, KeyCode::Char('A'));
+        assert!(requests.try_recv().is_err());
+        assert_eq!(runtime.app.search, "A");
+    }
+    #[test]
+    fn notification_menu_keeps_live_identity_even_when_same_row_changes_process() {
+        let mut runtime = fixture();
+        let (actions, requests) = std::sync::mpsc::sync_channel(16);
+        runtime.worker.actions = actions;
+        runtime.app.notifications.owner = true;
+        let mut row = open_terminal("pane-live", "/repo/project");
+        row.probable[0].activity_evidence = Some(crate::activity::MatchEvidence {
+            observation_key: "old-process".into(),
+            ..Default::default()
+        });
+        runtime.app.apply(Catalog {
+            sessions: vec![row],
+            ..Default::default()
+        });
+        runtime.key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE), 24);
+        runtime.app.catalog.sessions[0].probable[0]
+            .activity_evidence
+            .as_mut()
+            .unwrap()
+            .observation_key = "new-process".into();
+        runtime.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE), 24);
+        assert!(
+            matches!(requests.try_recv().unwrap(), Action::SetSessionNotifications { target, enabled: false } if target.session.is_none() && target.openings == ["old-process"])
+        );
+        runtime.app.panel = Panel::Projects;
+        runtime.key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::NONE), 24);
+        assert!(matches!(
+            requests.try_recv().unwrap(),
+            Action::SetNotifications(true)
+        ));
     }
     #[test]
     fn action_menu_navigates_activates_and_cannot_retarget_mutations() {

@@ -1,12 +1,12 @@
 ╭ Search the page text ────────────────╮
 │T╭ Conversation actions ────────────╮ │
 ╰─│ [pi] To resume · Acme Website    │─╯
-╭ │ Catalog ←→/Tab 6/6               │─╮
+╭ │ Catalog ←→/Tab 6/7               │─╮
 │T│ › Refresh catalog           [R]  │ │
 │A│                                  │ │
 │L│ ──────────────────────────────── │ │
 │ │ Re-read names, conversations,    │ │
 │N│ and openings without starting    │ │
 ╰─│ Tab groups  ↑↓ move  ↵ run  Esc  │─╯
-r ╰──────────────────────────────────╯
-
+a ╰──────────────────────────────────╯
+                              Alerts off

@@ -9,4 +9,4 @@
 │     └─ ▾ Api                        1│
 ╰ /repo ───────────────────────────────╯
 Space fold  v layout  s sort  ? actions
-Project order: Recent · latest saved upd
+Project order: Recent · lates Alerts off

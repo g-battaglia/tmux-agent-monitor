@@ -9,4 +9,4 @@
 │  Tooling                            1│
 ╰ /repo ───────────────────────────────╯
 Space fold  v layout  s sort  ? actions
-Project layout: Flat
+Project layout: Flat          Alerts off

@@ -9,4 +9,4 @@
 │                                      │
 ╰ /repo ───────────────────────────────╯
 Space fold  v layout  s sort  ? actions
-All project branches collapsed
+All project branches collapse Alerts off

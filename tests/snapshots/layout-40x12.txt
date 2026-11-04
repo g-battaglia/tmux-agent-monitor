@@ -2,11 +2,11 @@
 │Name, project, or note…  / or Ctrl-f  │
 ╰──────────────────────────────────────╯
 ╭ All · 5 ─────────────────────────────╮
-│› [pi][R] Acme Website / website-redes│
-│  [pi][R] Acme Website / api-migration│
-│  [pi][R] Acme Website / onboarding-fl│
-│  [pi][R] Acme Website / perf-audit   │
-│  [pi][R] Acme Website / release-notes│
+│› [pi][R][N] Acme Website / website-re│
+│  [pi][R][N] Acme Website / api-migrat│
+│  [pi][R][N] Acme Website / onboarding│
+│  [pi][R][N] Acme Website / perf-audit│
+│  [pi][R][N] Acme Website / release-no│
 ╰──────────────────────────────────────╯
-r to resume  Enter open  ? actions
-
+a alerts  r to resume  Enter  ? actions
+                              Alerts off

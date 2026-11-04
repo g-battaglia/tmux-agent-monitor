@@ -11,7 +11,7 @@
 │ │   Folders      │                                                         │ │
 │ │   Navigate     │                                                         │ │
 │ │ ▸ Catalog      │                                                         │ │
-│ │                │                                                         │ │
+│ │   Notifications│                                                         │ │
 │ │                │                                                         │ │
 │ │ ──────────────────────────────────────────────────────────────────────── │ │
 │ │ Re-read names, conversations, and openings without starting agents.      │ │
@@ -20,5 +20,5 @@
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-r to resume   d done   Enter open   f view   / search   ? actions
-
+a alerts  A all  r to resume  d done  Enter open  f view  ? actions
+                                                                      Alerts off

@@ -21,4 +21,4 @@
 │                              ││                                              │
 ╰ /repo ───────────────────────╯╰──────────────────────────────────────────────╯
 Space fold  E/C all  v tree/flat  s sort  Enter pick  ? actions
-Project order: Recent · latest saved update known for 3/4 matching projects; liv
+Project order: Recent · latest saved update known for 3/4 matching pr Alerts off

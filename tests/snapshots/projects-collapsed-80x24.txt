@@ -21,4 +21,4 @@
 │                              ││                                              │
 ╰ /repo ───────────────────────╯╰──────────────────────────────────────────────╯
 Space fold  E/C all  v tree/flat  s sort  Enter pick  ? actions
-All project branches collapsed
+All project branches collapsed                                        Alerts off

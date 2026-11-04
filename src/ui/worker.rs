@@ -24,6 +24,11 @@ pub struct DetailQuery {
     pub page: usize,
 }
 pub enum Action {
+    SetNotifications(bool),
+    SetSessionNotifications {
+        target: crate::notifications::Target,
+        enabled: bool,
+    },
     Change {
         id: String,
         state: Option<ResumeState>,
@@ -41,6 +46,7 @@ pub enum Action {
 }
 pub enum Reply {
     Catalog(Catalog),
+    Notifications(crate::notifications::NotificationState),
     Detail {
         query: DetailQuery,
         result: Result<Conversation, String>,
@@ -111,6 +117,15 @@ fn run(
     if replies.send(Reply::Catalog(catalog.clone())).is_err() {
         return;
     }
+    let mut notifications =
+        crate::notifications::Notifications::new(crate::notifications::desktop::SystemDesktop);
+    notifications.refresh(&service.store, &service.root, &catalog);
+    if replies
+        .send(Reply::Notifications(notifications.snapshot()))
+        .is_err()
+    {
+        return;
+    }
     let mut indexer = match service.begin_index() {
         Ok(i) => Some(i),
         Err(e) => {
@@ -126,6 +141,32 @@ fn run(
         match actions.try_recv() {
             Ok(action) => {
                 let reply = match action {
+                    Action::SetNotifications(enabled) => Reply::Ack(
+                        notifications
+                            .set_global(&service.store, enabled)
+                            .map(|()| {
+                                if enabled {
+                                    "Desktop alerts enabled"
+                                } else {
+                                    "Desktop alerts disabled"
+                                }
+                                .into()
+                            })
+                            .map_err(error),
+                    ),
+                    Action::SetSessionNotifications { target, enabled } => Reply::Ack(
+                        notifications
+                            .set_target(&service.store, &target, enabled)
+                            .map(|()| {
+                                if enabled {
+                                    "Session alerts enabled (global switch still applies)"
+                                } else {
+                                    "Session alerts disabled"
+                                }
+                                .into()
+                            })
+                            .map_err(error),
+                    ),
                     Action::Change { id, state, note } => Reply::Ack(
                         service
                             .store
@@ -170,7 +211,11 @@ fn run(
                         Reply::Ack(Ok("Refresh requested".into()))
                     }
                 };
-                if replies.send(reply).is_err() {
+                if replies.send(reply).is_err()
+                    || replies
+                        .send(Reply::Notifications(notifications.snapshot()))
+                        .is_err()
+                {
                     break;
                 }
                 last_catalog = Instant::now() - Duration::from_secs(1);
@@ -188,9 +233,16 @@ fn run(
             }
         }
         if last_presence.elapsed() >= Duration::from_secs(2) {
-            match service.catalog() {
-                Ok(new) => catalog = new,
+            match service.poll_catalog() {
+                Ok(sample) => {
+                    catalog = sample.catalog;
+                    notifications.refresh(&service.store, &service.root, &catalog);
+                    notifications.consume(sample.completions, &catalog);
+                }
                 Err(e) => {
+                    notifications.refresh(&service.store, &service.root, &Catalog::default());
+                    notifications.unavailable();
+                    catalog.unbound.clear();
                     catalog.warnings = vec![error(e)];
                     for session in &mut catalog.sessions {
                         session.presence_verified = false;
@@ -271,7 +323,11 @@ fn run(
                     }
                 }
             }
-            if replies.send(Reply::Catalog(catalog.clone())).is_err() {
+            if replies.send(Reply::Catalog(catalog.clone())).is_err()
+                || replies
+                    .send(Reply::Notifications(notifications.snapshot()))
+                    .is_err()
+            {
                 break;
             }
             last_catalog = Instant::now();

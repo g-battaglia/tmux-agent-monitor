@@ -11,6 +11,7 @@
 │ │   Folders      │                                                         │ │
 │ │   Navigate     │                                                         │ │
 │ │ ▸ Catalog      │                                                         │ │
+│ │   Notifications│                                                         │ │
 │ │                │                                                         │ │
 │ │ ──────────────────────────────────────────────────────────────────────── │ │
 │ │ Re-read names, conversations, and openings without starting agents.      │ │
@@ -18,7 +19,6 @@
 │ │ Tab/←→ groups   ↑↓ choose   Enter run   Esc close                        │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 │                              ││                                              │
-│                              ││                                              │
 ╰ /repo ───────────────────────╯╰──────────────────────────────────────────────╯
 Space fold  E/C all  v tree/flat  s sort  Enter pick  ? actions
-
+                                                                      Alerts off

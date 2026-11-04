@@ -24,6 +24,7 @@ pub enum Panel {
 /// caches; pushing updates in from worker replies keeps selection stable.
 pub struct App {
     pub catalog: Catalog,
+    pub notifications: crate::notifications::NotificationState,
     pub project: Option<String>,
     pub project_row: usize,
     pub view: View,
@@ -61,6 +62,7 @@ impl Default for App {
     fn default() -> Self {
         Self {
             catalog: Catalog::default(),
+            notifications: crate::notifications::NotificationState::default(),
             project: None,
             project_row: 0,
             view: View::Open,

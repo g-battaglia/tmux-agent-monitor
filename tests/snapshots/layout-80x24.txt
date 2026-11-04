@@ -2,11 +2,11 @@
 │Name, project, or note…  / or Ctrl-f                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ All · 5 ─────────────────────╮╭ Acme Website / website-redesign ─────────────╮
-│› [pi][R] Acme Website / websi││To resume    Presence unverified              │
-│  [pi][R] Acme Website / api-m││Acme Website                                  │
-│  [pi][R] Acme Website / onboa││Last exchange: —                              │
-│  [pi][R] Acme Website / perf-││                                              │
-│  [pi][R] Acme Website / relea││Next step                                     │
+│› [pi][R][N] Acme Website / we││To resume    Presence unverified              │
+│  [pi][R][N] Acme Website / ap││Acme Website                                  │
+│  [pi][R][N] Acme Website / on││Last exchange: —                              │
+│  [pi][R][N] Acme Website / pe││                                              │
+│  [pi][R][N] Acme Website / re││Next step                                     │
 │                              ││Check the hero spacing in a real browser.     │
 │                              ││                                              │
 │                              ││Latest saved branch                           │
@@ -20,5 +20,5 @@
 │                              ││                                              │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-r to resume   d done   Enter open   f view   / search   ? actions
-
+a alerts  A all  r to resume  d done  Enter open  f view  ? actions
+                                                                      Alerts off

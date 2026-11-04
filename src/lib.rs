@@ -9,6 +9,7 @@ pub mod activity;
 pub mod details;
 mod formats;
 pub mod model;
+pub mod notifications;
 pub mod opencode;
 pub mod paths;
 pub mod pi;

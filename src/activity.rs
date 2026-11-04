@@ -50,6 +50,12 @@ pub struct MatchEvidence {
     pub sampled_at: i64,
     #[serde(default)]
     pub warning: String,
+    /// Full process/session identity for ephemeral UI and notification policy.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub observation_key: String,
+    /// Monotonic duration at the latest sample, never inferred from transcripts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_elapsed_ms: Option<u64>,
 }
 #[derive(Debug, Deserialize)]
 struct Manifest {
@@ -328,6 +334,15 @@ struct Observation {
     working_seen: bool,
     finished: bool,
     idle: Option<(u64, u64, u8)>,
+    completion_emitted: bool,
+    last_state: Option<AgentActivity>,
+    changed_at: u64,
+}
+/// An observation is a level; completion is a one-shot edge for this work cycle.
+pub struct ActivitySample {
+    pub state: AgentActivity,
+    pub evidence: MatchEvidence,
+    pub finished_now: bool,
 }
 /// Per monitor-run, memory-only history. No screen text or durable state.
 #[derive(Default)]
@@ -338,7 +353,48 @@ impl ActivityTracker {
     pub fn retain(&mut self, active: &HashSet<String>) {
         self.records.retain(|key, _| active.contains(key));
     }
+    /// Compatibility path for callers interested only in the current state.
     pub fn observe(
+        &mut self,
+        key: &str,
+        state: AgentActivity,
+        evidence: MatchEvidence,
+        signature: Option<u64>,
+        now_ms: u64,
+    ) -> (AgentActivity, MatchEvidence) {
+        let sample = self.observe_sample(key, state, evidence, signature, now_ms);
+        (sample.state, sample.evidence)
+    }
+    pub fn observe_sample(
+        &mut self,
+        key: &str,
+        state: AgentActivity,
+        evidence: MatchEvidence,
+        signature: Option<u64>,
+        now_ms: u64,
+    ) -> ActivitySample {
+        let (state, mut evidence) = self.observe_state(key, state, evidence, signature, now_ms);
+        let observation = self
+            .records
+            .get_mut(key)
+            .expect("observation just inserted");
+        let finished_now = state == AgentActivity::Finished && !observation.completion_emitted;
+        if finished_now {
+            observation.completion_emitted = true;
+        }
+        if observation.last_state != Some(state) {
+            observation.changed_at = now_ms;
+            observation.last_state = Some(state);
+        }
+        evidence.observation_key = key.into();
+        evidence.state_elapsed_ms = Some(now_ms.saturating_sub(observation.changed_at));
+        ActivitySample {
+            state,
+            evidence,
+            finished_now,
+        }
+    }
+    fn observe_state(
         &mut self,
         key: &str,
         state: AgentActivity,
@@ -353,6 +409,7 @@ impl ActivityTracker {
         match state {
             AgentActivity::Working => {
                 observation.working_seen = true;
+                observation.completion_emitted = false;
                 observation.finished = false;
                 observation.idle = None;
             }
@@ -379,7 +436,10 @@ impl ActivityTracker {
                 observation.idle = None;
             }
             _ => {
-                *observation = Observation::default();
+                observation.working_seen = false;
+                observation.finished = false;
+                observation.idle = None;
+                observation.completion_emitted = false;
             }
         }
         (state, evidence)
@@ -409,13 +469,24 @@ pub fn describe(provider: Provider, state: AgentActivity, evidence: &MatchEviden
     } else {
         &evidence.fallback_reason
     };
+    let timing = evidence
+        .state_elapsed_ms
+        .map(|ms| {
+            format!(
+                "; state observed for {}s at {}",
+                ms / 1000,
+                paths::date(evidence.sampled_at)
+            )
+        })
+        .unwrap_or_default();
     format!(
-        "{} · {} ({}; {} manifest v{}; inferred)",
+        "{} · {} ({}; {} manifest v{}; inferred{})",
         provider.label(),
         state.label(),
         why,
         evidence.manifest_source,
-        evidence.manifest_version
+        evidence.manifest_version,
+        timing,
     )
 }
 
@@ -712,6 +783,34 @@ screen_any = ["signal"]"#;
                 .0,
             AgentActivity::Idle
         );
+    }
+    #[test]
+    fn completion_edges_are_once_per_work_cycle_and_times_are_monotonic() {
+        let mut tracker = ActivityTracker::default();
+        let mut sample = |state, now| {
+            tracker.observe_sample("identity", state, MatchEvidence::default(), Some(1), now)
+        };
+        assert!(!sample(AgentActivity::Idle, 0).finished_now);
+        assert!(!sample(AgentActivity::Working, 2000).finished_now);
+        assert!(!sample(AgentActivity::Idle, 4000).finished_now);
+        let first = sample(AgentActivity::Idle, 6000);
+        assert!(first.finished_now);
+        assert_eq!(first.evidence.state_elapsed_ms, Some(0));
+        let later = sample(AgentActivity::Idle, 8000);
+        assert!(!later.finished_now);
+        assert_eq!(later.evidence.observation_key, "identity");
+        assert_eq!(later.evidence.state_elapsed_ms, Some(2000));
+        // A transient menu must not rearm a turn that already completed.
+        assert!(!sample(AgentActivity::Waiting, 10000).finished_now);
+        assert!(!sample(AgentActivity::Idle, 12000).finished_now);
+        assert!(!sample(AgentActivity::Idle, 14000).finished_now);
+        sample(AgentActivity::Working, 16000);
+        sample(AgentActivity::Blocked, 18000);
+        sample(AgentActivity::Idle, 20000);
+        assert!(sample(AgentActivity::Idle, 22000).finished_now);
+        sample(AgentActivity::Unknown, 24000);
+        sample(AgentActivity::Idle, 26000);
+        assert!(!sample(AgentActivity::Idle, 28000).finished_now);
     }
     #[test]
     fn failures_errors_and_changing_snapshots_cannot_complete_work() {

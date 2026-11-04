@@ -11,11 +11,12 @@
 │                  │ All projects                                                                   │                  │
 ╰ /repo ───────────│ Categories       Catalog 1/1                                                   │                  │
 ╭ All · 5 ─────────│   Find         │ › Refresh catalog                                        [R]  │                  │
-│› [pi][R] Acme Web│   Project      │                                                               │                  │
-│  [pi][R] Acme Web│   Folders      │                                                               │                  │
-│  [pi][R] Acme Web│   Navigate     │                                                               │                  │
-│  [pi][R] Acme Web│ ▸ Catalog      │                                                               │                  │
-│  [pi][R] Acme Web│                │                                                               │                  │
+│› [pi][R][N] Acme │   Project      │                                                               │                  │
+│  [pi][R][N] Acme │   Folders      │                                                               │                  │
+│  [pi][R][N] Acme │   Navigate     │                                                               │                  │
+│  [pi][R][N] Acme │ ▸ Catalog      │                                                               │                  │
+│  [pi][R][N] Acme │   Notifications│                                                               │                  │
+│                  │                │                                                               │                  │
 │                  │ ────────────────────────────────────────────────────────────────────────────── │                  │
 │                  │ Re-read names, conversations, and openings without starting agents.            │                  │
 │                  │                                                                                │                  │
@@ -26,7 +27,6 @@
 │                                              ││                                                                      │
 │                                              ││                                                                      │
 │                                              ││                                                                      │
-│                                              ││                                                                      │
 ╰──────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────╯
 Space fold  E/C all  v tree/flat  s sort  Enter pick  ? actions
-
+                                                                                                              Alerts off

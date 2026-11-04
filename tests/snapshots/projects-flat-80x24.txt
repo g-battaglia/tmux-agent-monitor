@@ -21,4 +21,4 @@
 │                              ││                                              │
 ╰ /repo ───────────────────────╯╰──────────────────────────────────────────────╯
 Space fold  E/C all  v tree/flat  s sort  Enter pick  ? actions
-Project layout: Flat
+Project layout: Flat                                                  Alerts off

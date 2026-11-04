@@ -157,10 +157,14 @@ impl Details {
             activity_evidence: session
                 .openings()
                 .filter_map(|p| {
-                    Some(crate::activity::describe(
-                        p.provider?,
-                        p.activity?,
-                        p.activity_evidence.as_ref()?,
+                    Some(format!(
+                        "{}: {}",
+                        paths::line(&p.target),
+                        crate::activity::describe(
+                            p.provider?,
+                            p.activity?,
+                            p.activity_evidence.as_ref()?,
+                        )
                     ))
                 })
                 .collect(),

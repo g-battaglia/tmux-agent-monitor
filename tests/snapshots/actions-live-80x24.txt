@@ -11,7 +11,7 @@
 │ │   Folders      │   – Mark Done                                      [d]  │ │
 │ │   Navigate     │   – Mark To resume                                 [r]  │ │
 │ │   Catalog      │   – Undo last change                               [u]  │ │
-│ │                │   Details                                          [i]  │ │
+│ │   Notifications│   Details                                          [i]  │ │
 │ │                │                                                         │ │
 │ │ ──────────────────────────────────────────────────────────────────────── │ │
 │ │ Saved session required for notes and decisions.                          │ │
@@ -20,5 +20,5 @@
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 │                              ││                                              │
 ╰──────────────────────────────╯╰──────────────────────────────────────────────╯
-r to resume   d done   Enter open   f view   / search   ? actions
-
+a alerts  A all  r to resume  d done  Enter open  f view  ? actions
+                                                                      Alerts off

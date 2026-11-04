@@ -1,12 +1,12 @@
 ╭ Search sessions ─────────────────────╮
 │N╭ Session actions ─────────────────╮ │
 ╰─│ [claude] Live terminal · Acme W… │─╯
-╭ │ Session ←→/Tab 2/5               │─╮
-│›│   Focus live terminal   [Enter]  │b│
-│ │ › – Edit next-step note     [n]  │n│
-│ │ ──────────────────────────────── │l│
-│ │ Saved session required for notes │ │
-│ │ and decisions.                   │s│
+╭ │ Session ←→/Tab 2/6               │─╮
+│›│   Focus live terminal   [Enter]  │ │
+│ │ › – Edit next-step note     [n]  │t│
+│ │ ──────────────────────────────── │g│
+│ │ Saved session required for notes │t│
+│ │ and decisions.                   │o│
 ╰─│ Tab groups  ↑↓ move  ↵ run  Esc  │─╯
-r ╰──────────────────────────────────╯
-
+a ╰──────────────────────────────────╯s
+                              Alerts off

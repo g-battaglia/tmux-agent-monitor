@@ -11,11 +11,11 @@
 │                  │ website-redesign                                                               │                  │
 ╰ /repo ───────────│ Categories       Catalog 1/1                                                   │                  │
 ╭ All · 5 ─────────│   Find         │ › Refresh catalog                                        [R]  │                  │
-│› [pi][R] Acme Web│   Session      │                                                               │                  │
-│  [pi][R] Acme Web│   Folders      │                                                               │                  │
-│  [pi][R] Acme Web│   Navigate     │                                                               │                  │
-│  [pi][R] Acme Web│ ▸ Catalog      │                                                               │                  │
-│  [pi][R] Acme Web│                │                                                               │                  │
+│› [pi][R][N] Acme │   Session      │                                                               │                  │
+│  [pi][R][N] Acme │   Folders      │                                                               │                  │
+│  [pi][R][N] Acme │   Navigate     │                                                               │                  │
+│  [pi][R][N] Acme │ ▸ Catalog      │                                                               │                  │
+│  [pi][R][N] Acme │   Notifications│                                                               │                  │
 │                  │                │                                                               │                  │
 │                  │ ────────────────────────────────────────────────────────────────────────────── │                  │
 │                  │ Re-read names, conversations, and openings without starting agents.            │                  │
@@ -28,5 +28,5 @@
 │                                              ││                                                                      │
 │                                              ││                                                                      │
 ╰──────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────╯
-r to resume   d done   Enter open   f view   / search   ? actions
-
+a alerts  A all  r to resume  d done  Enter open  f view  ? actions
+                                                                                                              Alerts off

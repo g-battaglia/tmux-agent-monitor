@@ -1,7 +1,7 @@
 ╭ Search projects ─────────────────────╮
 │N╭ Project actions ─────────────────╮ │
 ╰─│ All view · Tree · A–Z            │─╯
-╭ │ Catalog ←→/Tab 5/5               │─╮
+╭ │ Catalog ←→/Tab 5/6               │─╮
 │›│ › Refresh catalog           [R]  │ │
 │ │                                  │5│
 │ │ ──────────────────────────────── │5│
@@ -9,4 +9,4 @@
 │ │ and openings without starting    │ │
 ╰ │ Tab groups  ↑↓ move  ↵ run  Esc  │─╯
 Sp╰──────────────────────────────────╯s
-
+                              Alerts off

@@ -11,11 +11,11 @@
 │                  │ Review the navigation and accessibility of the synthetic website mockup 界 界 界  │                  │
 ╰ /repo ───────────│ Categories       Session 2/6                                                   │                  │
 ╭ All · 5 ─────────│   Find         │   Focus live terminal                                [Enter]  │                  │
-│› [claude][R] live│ ▸ Session      │ › – Edit next-step note                                  [n]  │                  │
-│  [pi][R] Acme Web│   Folders      │   – Mark Done                                            [d]  │                  │
-│  [pi][R] Acme Web│   Navigate     │   – Mark To resume                                       [r]  │                  │
-│  [pi][R] Acme Web│   Catalog      │   – Undo last change                                     [u]  │                  │
-│  [pi][R] Acme Web│                │   Details                                                [i]  │                  │
+│› [claude][R][N] l│ ▸ Session      │ › – Edit next-step note                                  [n]  │                  │
+│  [pi][R][N] Acme │   Folders      │   – Mark Done                                            [d]  │                  │
+│  [pi][R][N] Acme │   Navigate     │   – Mark To resume                                       [r]  │                  │
+│  [pi][R][N] Acme │   Catalog      │   – Undo last change                                     [u]  │                  │
+│  [pi][R][N] Acme │   Notifications│   Details                                                [i]  │                  │
 │                  │                │                                                               │                  │
 │                  │ ────────────────────────────────────────────────────────────────────────────── │                  │
 │                  │ Saved session required for notes and decisions.                                │                  │
@@ -28,5 +28,5 @@
 │                                              ││                                                                      │
 │                                              ││                                                                      │
 ╰──────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────╯
-r to resume   d done   Enter open   f view   / search   ? actions
-
+a alerts  A all  r to resume  d done  Enter open  f view  ? actions
+                                                                                                              Alerts off

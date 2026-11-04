@@ -13,11 +13,11 @@
 │                                                              ││                                                                                              │
 ╰ /repo ───────────────────────────────────────────────────────╯│You  —                                                                                        │
 ╭ All · 5 ─────────────────────────────────────────────────────╮│Check the new landing copy.                                                                   │
-│› [pi][R] Acme Website / website-redesign                     ││                                                                                              │
-│  [pi][R] Acme Website / api-migration                        ││Pi  —                                                                                         │
-│  [pi][R] Acme Website / onboarding-flow                      ││The draft is ready for review.                                                                │
-│  [pi][R] Acme Website / perf-audit                           ││Mobile spacing still needs checking.                                                          │
-│  [pi][R] Acme Website / release-notes                        ││                                                                                              │
+│› [pi][R][N] Acme Website / website-redesign                  ││                                                                                              │
+│  [pi][R][N] Acme Website / api-migration                     ││Pi  —                                                                                         │
+│  [pi][R][N] Acme Website / onboarding-flow                   ││The draft is ready for review.                                                                │
+│  [pi][R][N] Acme Website / perf-audit                        ││Mobile spacing still needs checking.                                                          │
+│  [pi][R][N] Acme Website / release-notes                     ││                                                                                              │
 │                                                              ││                                                                                              │
 │                                                              ││                                                                                              │
 │                                                              ││                                                                                              │
@@ -36,5 +36,5 @@
 │                                                              ││                                                                                              │
 │                                                              ││                                                                                              │
 ╰──────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-r to resume   d done   Enter open   f view   / search   ? actions
-
+a alerts  A all  r to resume  d done  Enter open  f view  ? actions
+                                                                                                                                                      Alerts off

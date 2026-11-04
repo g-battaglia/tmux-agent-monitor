@@ -9,6 +9,13 @@ use tmux_agent_monitor::{
 };
 fn main() -> anyhow::Result<()> {
     let mut app = App::default();
+    // Presentation only: this synthetic fixture never constructs a sender.
+    app.notifications.preferences.enabled = true;
+    app.notifications.owner = true;
+    app.notifications
+        .preferences
+        .sessions
+        .insert("demo-2".into(), false);
     let demos = [
         (
             Provider::Claude,
@@ -69,6 +76,7 @@ fn main() -> anyhow::Result<()> {
                         rule_id: "synthetic-status".into(),
                         manifest_source: "bundled".into(),
                         manifest_version: 2,
+                        observation_key: format!("synthetic-opening-{i}"),
                         ..Default::default()
                     }),
                 }]
