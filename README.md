@@ -393,8 +393,9 @@ restores or external agent starts: provider process creation is not atomic.
 
 Checkpoints are atomic owner-only JSON files under the monitor data directory's
 `workspace/`. A per-data-directory lock serializes saves and recovery and prevents
-auto-checkpointing temporary recovery placeholders. The latest nonempty
-checkpoint and up to twenty changed versions
+auto-checkpointing temporary recovery placeholders. A pane whose cwd cannot be
+observed still retains its geometry, but blocks launch rather than inheriting a
+guessed directory. The latest nonempty checkpoint and up to twenty changed versions
 are retained. Empty or failed discovery never erases the last checkpoint. If
 sessions were closed gradually, use `snapshot --list` and choose an older full
 checkpoint. They contain paths, titles and original launch strings (potentially

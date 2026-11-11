@@ -611,6 +611,45 @@ fn explicit_chat_binding_survives_checkpoints_but_not_process_reuse() {
 }
 
 #[test]
+fn unobservable_cwd_keeps_the_geometry_but_blocks_launch_without_guessing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = paths::canonical(dir.path());
+    let mut snapshot = fixture(&root);
+    snapshot.servers[0].sessions[0].windows[0].panes[0]
+        .cwd
+        .clear();
+    let client = stub(&root, &snapshot);
+    let captured = capture_with(
+        &client,
+        &[snapshot.servers[0].socket.clone()],
+        &Catalog::default(),
+        None,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(captured.counts(), (2, 3, 5));
+    save(&root, &captured).unwrap();
+    assert_eq!(load(&root, None).unwrap().counts(), (2, 3, 5));
+    assert!(
+        captured
+            .blockers(&Catalog::default(), RestoreOptions::default())
+            .iter()
+            .any(|s| s.contains("directory is unavailable"))
+    );
+    assert!(
+        restore_with(
+            &client,
+            &root,
+            &captured,
+            &Catalog::default(),
+            RestoreOptions::default()
+        )
+        .is_err()
+    );
+    assert!(!commands(&root).iter().any(|a| a[0].starts_with("new-")));
+}
+
+#[test]
 fn workspace_lock_serializes_recovery_and_checkpoint_publication() {
     let dir = tempfile::tempdir().unwrap();
     let root = paths::canonical(dir.path());

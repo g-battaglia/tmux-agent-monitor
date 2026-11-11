@@ -71,6 +71,8 @@ pub struct SavedPane {
     pub id: String,
     pub index: u32,
     pub active: bool,
+    /// Empty when tmux cannot observe cwd (for example a dead pane). Keep its
+    /// geometry in the checkpoint, but block recovery instead of guessing a cwd.
     pub cwd: String,
     pub title: String,
     pub current_command: String,
@@ -559,7 +561,7 @@ impl Workspace {
                             "nonstandard pane-index/layout order cannot be restored exactly"
                         );
                         ensure!(
-                            Path::new(&pane.cwd).is_absolute()
+                            (pane.cwd.is_empty() || Path::new(&pane.cwd).is_absolute())
                                 && pane.cwd.len() <= 4096
                                 && pane.start_command.len() <= 65536
                                 && pane.title.len() <= 16384,
