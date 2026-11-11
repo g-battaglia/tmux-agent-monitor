@@ -261,7 +261,7 @@ pub fn menu_groups_area(area: Rect, count: usize) -> Rect {
     // Thirteen cells for "Notifications", plus the two-cell selection marker.
     Rect::new(outer.x + 2, body.y, 15, body.height)
 }
-fn clipped(text: &str, width: u16) -> String {
+pub(super) fn clipped(text: &str, width: u16) -> String {
     let text = paths::line(text);
     if Line::from(text.clone()).width() <= width as usize {
         return text;

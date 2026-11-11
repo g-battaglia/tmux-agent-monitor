@@ -34,6 +34,10 @@ pub enum Action {
         state: Option<ResumeState>,
         note: Option<String>,
     },
+    Remember {
+        id: String,
+        pane: Box<crate::tmux::PaneIdentity>,
+    },
     Undo(String),
     Focus(Box<Binding>),
     FocusPane(Box<crate::tmux::PaneIdentity>),
@@ -136,6 +140,8 @@ fn run(
     let mut last_presence = Instant::now() - Duration::from_secs(3);
     let mut last_catalog = Instant::now();
     let mut last_index = Instant::now();
+    let mut last_snapshot = Instant::now() - Duration::from_secs(10);
+    let mut previous_snapshot = crate::workspace::load(&service.root, None).ok();
     loop {
         // One mutation per loop turn; reads can never consume a pending write.
         match actions.try_recv() {
@@ -172,6 +178,12 @@ fn run(
                             .store
                             .change(&id, state, note.as_deref())
                             .map(|()| "Saved".into())
+                            .map_err(error),
+                    ),
+                    Action::Remember { id, pane } => Reply::Ack(
+                        service
+                            .remember_session(&pane, &id)
+                            .map(|()| "Saved and associated with this terminal".into())
                             .map_err(error),
                     ),
                     Action::Undo(id) => Reply::Ack(
@@ -238,6 +250,27 @@ fn run(
                     catalog = sample.catalog;
                     notifications.refresh(&service.store, &service.root, &catalog);
                     notifications.consume(sample.completions, &catalog);
+                    if last_snapshot.elapsed() >= Duration::from_secs(10) {
+                        let checkpoint = (|| -> anyhow::Result<()> {
+                            let bindings = service.workspace_bindings(&catalog)?;
+                            let (snapshot, saved) = crate::workspace::checkpoint(
+                                &service.root,
+                                &catalog,
+                                previous_snapshot.as_ref(),
+                                &bindings,
+                            )?;
+                            if saved.is_some() {
+                                previous_snapshot = Some(snapshot);
+                            }
+                            Ok(())
+                        })();
+                        if let Err(e) = checkpoint {
+                            catalog
+                                .warnings
+                                .push(format!("Workspace checkpoint not updated: {}", error(e)));
+                        }
+                        last_snapshot = Instant::now();
+                    }
                 }
                 Err(e) => {
                     notifications.refresh(&service.store, &service.root, &Catalog::default());
@@ -312,6 +345,9 @@ fn run(
                     }
                 }
                 crate::service::associate_probable(&mut sessions, &catalog.unbound);
+                if let Err(e) = service.associate_remembered(&mut sessions, &catalog.unbound) {
+                    catalog.warnings.push(error(e));
+                }
                 crate::service::append_live_panes(&mut sessions, &catalog.unbound);
                 catalog.sessions = sessions;
             }

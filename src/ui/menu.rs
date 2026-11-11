@@ -127,8 +127,7 @@ impl CommandMenu {
             menu.add("Folders","Toggle branch","Space",KeyCode::Char(' '),"On All projects, toggles all branches. Arrow keys navigate and fold; clicking a triangle also folds.",tree && (branch || app.project_row == 0 && branches) && app.project_search.is_empty());
         } else {
             let session = app.current();
-            let persistent =
-                session.is_some_and(|s| !s.id.starts_with("live-") && !s.id.starts_with("pane-"));
+            let persistent = session.is_some_and(|s| s.persistent());
             menu.add(
                 "Session",
                 if session.is_some_and(|s| s.id.starts_with("pane-") || s.id.starts_with("live-")) {
@@ -169,8 +168,9 @@ impl CommandMenu {
                 "Mark To resume",
                 "r",
                 KeyCode::Char('r'),
-                "Keep this conversation in the to-resume list.",
-                persistent && session.is_some_and(|s| s.state != ResumeState::Resume),
+                "Keep this conversation in the to-resume list; unidentified terminals offer a saved-chat picker.",
+                session.is_some_and(|s| !s.persistent() || s.state != ResumeState::Resume
+                    || s.bindings.is_empty() && s.probable.len() == 1),
             );
             menu.add(
                 "Session",

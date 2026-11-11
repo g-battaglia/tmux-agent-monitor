@@ -138,6 +138,12 @@ pub struct Session {
 }
 
 impl Session {
+    /// Only imported conversations have a durable catalog row. Terminal and
+    /// unsaved-run ids must never be sent to SQLite mutation operations.
+    pub fn persistent(&self) -> bool {
+        !self.id.starts_with("live-") && !self.id.starts_with("pane-")
+    }
+
     pub fn openings(&self) -> impl Iterator<Item = &crate::tmux::PaneIdentity> {
         self.bindings
             .iter()

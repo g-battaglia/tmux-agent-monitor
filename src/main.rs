@@ -13,8 +13,8 @@ use std::{
 use tmux_agent_monitor::{
     model::{ResumeState, View, project_name},
     paths, presence,
-    service::Service,
-    ui,
+    service::{RestoreStatus, Service},
+    ui, workspace,
 };
 
 #[derive(Parser)]
@@ -74,6 +74,43 @@ enum Cmd {
         binding: Option<String>,
         #[arg(long)]
         resume: bool,
+    },
+    /// Save tmux session/window/pane geometry and recoverable chat identities.
+    Snapshot {
+        /// List retained checkpoints instead of capturing the live workspace.
+        #[arg(long, conflicts_with = "bind")]
+        list: bool,
+        /// Explicitly associate a terminal with a saved chat: %pane=catalog-id.
+        #[arg(long, conflicts_with = "list")]
+        bind: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview the saved tmux workspace; --resume reconstructs it detached.
+    Restore {
+        /// Restore only the To resume list, WITHOUT its previous tmux geometry.
+        #[arg(long, conflicts_with_all = ["snapshot", "layout_only", "commands", "allow_probable"])]
+        marked: bool,
+        #[arg(long, requires = "marked")]
+        project: Option<String>,
+        /// Choose an older checkpoint instead of workspace/latest.json.
+        #[arg(long)]
+        snapshot: Option<PathBuf>,
+        /// Reconstruct only the layout using empty shells, never saved programs.
+        #[arg(long, conflicts_with_all = ["commands", "allow_probable"])]
+        layout_only: bool,
+        /// Explicitly authorize replay of saved non-agent tmux launch strings.
+        #[arg(long)]
+        commands: bool,
+        /// Authorize title/cwd-only chat associations (not verified identities).
+        #[arg(long)]
+        allow_probable: bool,
+        /// Explicitly authorize launches. Without this flag nothing starts.
+        #[arg(long, conflicts_with = "json")]
+        resume: bool,
+        /// Print the recovery plan as JSON (never starts agents).
+        #[arg(long)]
+        json: bool,
     },
     Done {
         id: String,
@@ -360,6 +397,163 @@ fn run(cli: Cli) -> Result<()> {
                 Ok(())
             }
         }
+        Cmd::Snapshot { list, bind, json } => {
+            if list {
+                let mut files = workspace::checkpoints(&service.root)?;
+                files.sort();
+                if json {
+                    return print_json(&files);
+                }
+                for file in files {
+                    println!("{}", paths::line(&file.to_string_lossy()));
+                }
+                return Ok(());
+            }
+            service.sync()?;
+            let catalog = service.catalog()?;
+            let previous = workspace::load(&service.root, None).ok();
+            let mut bindings = service.workspace_bindings(&catalog)?;
+            // Explicit CLI choices replace remembered choices for the same pane.
+            for choice in &bind {
+                let target = choice
+                    .split_once('=')
+                    .context("binding must be %pane=chat-id")?
+                    .0;
+                bindings.retain(|b| {
+                    b.split_once('=')
+                        .is_none_or(|(p, _)| p != target && !p.ends_with(&format!(":{target}")))
+                });
+                bindings.push(choice.clone());
+            }
+            let (snapshot, saved) =
+                workspace::checkpoint(&service.root, &catalog, previous.as_ref(), &bindings)?;
+            let saved = saved.context("No live tmux sessions; previous checkpoint was kept")?;
+            if json {
+                return print_json(&snapshot);
+            }
+            println!(
+                "{}\nSaved: {}\nRun restore to inspect recoverability before closing tmux.",
+                snapshot.summary(),
+                paths::line(&saved.to_string_lossy())
+            );
+            Ok(())
+        }
+        Cmd::Restore {
+            marked,
+            project: _,
+            snapshot,
+            layout_only,
+            commands,
+            allow_probable,
+            resume,
+            json,
+        } if !marked => {
+            let saved = workspace::load(&service.root, snapshot.as_deref())?;
+            let catalog = service.catalog()?;
+            let options = workspace::RestoreOptions {
+                layout_only,
+                commands,
+                allow_probable,
+            };
+            let blockers = saved.blockers(&catalog, options);
+            if json {
+                return print_json(&serde_json::json!({"workspace":saved,"blockers":blockers}));
+            }
+            println!("{}", saved.summary());
+            for issue in &blockers {
+                println!("Blocked: {}", paths::line(issue));
+            }
+            if !resume {
+                println!(
+                    "Preview only. restore --resume reconstructs the checkpoint in detached sessions; --marked restores only the chat list, without geometry."
+                );
+                return Ok(());
+            }
+            ensure!(
+                blockers.is_empty(),
+                "Resolve all blockers before recovery, or explicitly choose --layout-only"
+            );
+            let receipt = workspace::restore(&service.root, &saved, &catalog, options)?;
+            println!(
+                "Workspace reconstructed. No client was attached or switched. Journal: {}",
+                paths::line(&receipt.to_string_lossy())
+            );
+            Ok(())
+        }
+        Cmd::Restore {
+            project,
+            resume,
+            json,
+            ..
+        } => {
+            for warning in service.sync()? {
+                eprintln!("{}", paths::line(&warning));
+            }
+            let catalog = service.catalog()?;
+            let project = resolve_project(&catalog, project)?;
+            let plan = service.restore_plan(&catalog, project.as_deref());
+            if json {
+                return print_json(&plan);
+            }
+            if plan.is_empty() {
+                println!("No chats marked To resume. Use r in the monitor or reopen <id> first.");
+                return Ok(());
+            }
+            let mut restored = Vec::new();
+            let mut failed = 0;
+            for entry in &plan {
+                let label = format!("{} / {}", project_name(&entry.cwd), entry.title);
+                match &entry.status {
+                    RestoreStatus::Open => println!("Already open: {}", paths::line(&label)),
+                    RestoreStatus::Skipped(reason) => {
+                        println!("Skipped: {} — {}", paths::line(&label), paths::line(reason))
+                    }
+                    RestoreStatus::Ready if !resume => {
+                        println!("Would restore: {}\n  {}", paths::line(&label), entry.id)
+                    }
+                    RestoreStatus::Ready => {
+                        // Rebuild presence and reread identity immediately before
+                        // each launch. Never bypass uncertainty during a bulk start.
+                        let launch = service
+                            .restore_spec(&entry.id, &restored)
+                            .and_then(|fresh| fresh.launch_detached());
+                        match launch {
+                            Ok(opening) => {
+                                println!(
+                                    "Restored: {} (tmux session {})",
+                                    paths::line(&label),
+                                    paths::line(&opening.session)
+                                );
+                                restored.push(opening);
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                eprintln!(
+                                    "Not restored: {} — {}",
+                                    paths::line(&label),
+                                    paths::line(&format!("{e:#}"))
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if !resume {
+                println!(
+                    "Preview only. Pass restore --marked --resume to start ready chats WITHOUT their previous geometry; existing clients are not moved."
+                );
+            } else {
+                println!(
+                    "{} restored, {failed} failed; existing openings and uncertain sessions skipped.",
+                    restored.len()
+                );
+                ensure!(
+                    failed == 0,
+                    "some chats could not be restored; review the messages above"
+                );
+            }
+            Ok(())
+        }
         Cmd::Agent { .. } => unreachable!("agent diagnostics do not open the state database"),
         Cmd::Done { id } => service.store.change(&id, Some(ResumeState::Done), None),
         Cmd::Reopen { id } => service.store.change(&id, Some(ResumeState::Resume), None),
@@ -602,6 +796,45 @@ fn resolve_project(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn restore_is_a_preview_unless_explicitly_authorized() {
+        let cli = Cli::try_parse_from(["tmux-agent-monitor", "restore"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Cmd::Restore {
+                resume: false,
+                json: false,
+                marked: false,
+                ..
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["tmux-agent-monitor", "restore", "--resume", "--json"]).is_err()
+        );
+        for args in [
+            vec!["restore", "--project", "/project"],
+            vec!["restore", "--marked", "--layout-only"],
+            vec!["restore", "--marked", "--snapshot", "saved.json"],
+            vec!["restore", "--layout-only", "--commands"],
+            vec!["snapshot", "--list", "--bind", "%1=chat"],
+        ] {
+            assert!(
+                Cli::try_parse_from(std::iter::once("tmux-agent-monitor").chain(args)).is_err()
+            );
+        }
+        assert!(
+            Cli::try_parse_from([
+                "tmux-agent-monitor",
+                "restore",
+                "--resume",
+                "--marked",
+                "--project",
+                "/project"
+            ])
+            .is_ok()
+        );
+    }
+
     #[test]
     fn agent_watch_arguments_are_bounded_and_snapshot_mode_is_exclusive() {
         for args in [

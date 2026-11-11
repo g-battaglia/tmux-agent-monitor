@@ -237,6 +237,11 @@ impl Service {
         result
     }
     fn sample_catalog(&self) -> Result<CatalogPoll> {
+        self.sample_catalog_excluding(&[])
+    }
+    /// Openings just created by this restore invocation are not unidentified
+    /// external runs. Exclude only the exact socket/server/pane returned by tmux.
+    fn sample_catalog_excluding(&self, owned: &[tmux::DetachedOpening]) -> Result<CatalogPoll> {
         let mut warnings = vec![];
         let mut panes = match tmux::discover(&tmux::TmuxConfig::default()) {
             Ok(p) => p,
@@ -307,7 +312,14 @@ impl Service {
                 }
             }
         }
-        if tmux::unreported_pi(&bindings.iter().map(|b| b.bridge.pid).collect::<Vec<_>>())? > 0 {
+        let mut reported = bindings.iter().map(|b| b.bridge.pid).collect::<Vec<_>>();
+        reported.extend(
+            panes
+                .iter()
+                .filter(|p| owned.iter().any(|o| o.owns(p)))
+                .map(|p| p.client_pid),
+        );
+        if tmux::unreported_pi(&reported)? > 0 {
             warnings
                 .push("Some Pi runs have no extension: probable openings are marked [~]".into());
         }
@@ -363,6 +375,7 @@ impl Service {
             .into_iter()
             .filter(|p| {
                 p.provider.is_some()
+                    && !owned.iter().any(|o| o.owns(p))
                     && !bindings.iter().any(|b| {
                         b.pane
                             .as_ref()
@@ -376,6 +389,7 @@ impl Service {
             }
         }
         associate_probable(&mut sessions, &unbound);
+        self.associate_remembered(&mut sessions, &unbound)?;
         append_live_panes(&mut sessions, &unbound);
         Ok(CatalogPoll {
             catalog: Catalog {
@@ -420,11 +434,127 @@ impl Service {
         ensure!(matches.len() <= 1, "ambiguous id: choose the exact session");
         matches.into_iter().next().context("session not found")
     }
+    /// Remember an explicit user assignment. This reads/revalidates tmux but
+    /// never sends input or changes the terminal. The saved chat gets the R badge.
+    pub fn remember_session(&self, pane: &tmux::PaneIdentity, id: &str) -> Result<()> {
+        let fresh = tmux::discover(&tmux::TmuxConfig {
+            sockets: vec![pane.socket.clone()],
+        })?;
+        ensure!(
+            fresh.iter().any(|p| tmux::same_hint(p, pane)),
+            "Terminal identity changed; choose the chat again"
+        );
+        let session = self.store.resolve(id)?;
+        ensure!(
+            session.available
+                && pane.provider == Some(session.metadata.provider)
+                && paths::canonical(Path::new(&pane.cwd)) == Path::new(&session.metadata.cwd),
+            "Saved chat does not match the terminal provider/project"
+        );
+        self.store.change(id, Some(ResumeState::Resume), None)?;
+        let key = format!(
+            "workspace-binding:{:x}",
+            pi::hash(
+                format!(
+                    "{}:{}:{}",
+                    tmux::socket_key(&pane.socket),
+                    pane.server,
+                    pane.pane
+                )
+                .as_bytes()
+            )
+        );
+        self.store.set_preference(
+            &key,
+            &serde_json::to_string(&RememberedPane {
+                pane: pane.clone(),
+                session: session.id,
+            })?,
+        )
+    }
+
+    /// Invalid/stale assignments never move to another process or override an
+    /// extension-proven identity. Rebinding after an unreported /resume is explicit.
+    pub fn associate_remembered(
+        &self,
+        sessions: &mut [Session],
+        panes: &[tmux::PaneIdentity],
+    ) -> Result<()> {
+        for (_, raw) in self.store.prefixed_preferences("workspace-binding:")? {
+            let Ok(remembered) = serde_json::from_str::<RememberedPane>(&raw) else {
+                continue;
+            };
+            let Some(pane) = panes.iter().find(|p| tmux::same_hint(p, &remembered.pane)) else {
+                continue;
+            };
+            if let Some(index) = sessions.iter().position(|s| {
+                s.id == remembered.session
+                    && s.persistent()
+                    && s.available
+                    && s.bindings.is_empty()
+                    && pane.provider == Some(s.metadata.provider)
+                    && paths::canonical(Path::new(&pane.cwd)) == Path::new(&s.metadata.cwd)
+            }) {
+                // The user's exact-process choice takes priority over all title hints.
+                for session in sessions.iter_mut() {
+                    session.probable.retain(|p| {
+                        tmux::socket_key(&p.socket) != tmux::socket_key(&pane.socket)
+                            || p.pane != pane.pane
+                    });
+                }
+                sessions[index].probable.push(pane.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// Pass current explicit assignments to the checkpoint writer as user
+    /// choices, not title heuristics. Stale process/session tokens are excluded.
+    pub fn workspace_bindings(&self, catalog: &Catalog) -> Result<Vec<String>> {
+        let mut bindings = vec![];
+        for (_, raw) in self.store.prefixed_preferences("workspace-binding:")? {
+            let Ok(remembered) = serde_json::from_str::<RememberedPane>(&raw) else {
+                continue;
+            };
+            if catalog
+                .sessions
+                .iter()
+                .filter(|s| s.id == remembered.session)
+                .flat_map(|s| s.openings())
+                .any(|p| tmux::same_hint(p, &remembered.pane))
+            {
+                bindings.push(format!(
+                    "{}:{}={}",
+                    tmux::socket_key(&remembered.pane.socket),
+                    remembered.pane.pane,
+                    remembered.session
+                ));
+            }
+        }
+        Ok(bindings)
+    }
+
     /// Build a resume plan without starting anything. The UI/CLI shows it,
     /// asks for confirmation, then rebuilds and rechecks it right before launch.
     pub fn resume_spec(&self, target: &str) -> Result<ResumeSpec> {
         let catalog = self.catalog()?;
-        let session = self.resolve(&catalog, target)?;
+        self.resume_spec_in(&catalog, target)
+    }
+    /// Recheck all external openings between bulk launches without mistaking
+    /// our own freshly created, not-yet-reporting agents for unknown duplicates.
+    pub fn restore_spec(
+        &self,
+        target: &str,
+        owned: &[tmux::DetachedOpening],
+    ) -> Result<ResumeSpec> {
+        let catalog = self.sample_catalog_excluding(owned)?.catalog;
+        let spec = self.resume_spec_in(&catalog, target)?;
+        ensure!(spec.warning.is_empty(), "{}", spec.warning);
+        Ok(spec)
+    }
+    /// Build against one snapshot for a consistent, side-effect-free bulk plan.
+    fn resume_spec_in(&self, catalog: &Catalog, target: &str) -> Result<ResumeSpec> {
+        let session = self.resolve(catalog, target)?;
         ensure!(
             session.bindings.is_empty(),
             "session is already open: use the existing pane"
@@ -470,7 +600,69 @@ impl Service {
             warning,
         })
     }
+
+    /// Restore means the explicit To resume list, never all imported history.
+    /// Unknown presence is skipped rather than silently authorizing duplicates.
+    pub fn restore_plan(&self, catalog: &Catalog, project: Option<&str>) -> Vec<RestoreEntry> {
+        restore_entries(catalog, project, |session| {
+            let spec = self.resume_spec_in(catalog, &session.id)?;
+            ensure!(spec.warning.is_empty(), "{}", spec.warning);
+            Ok(())
+        })
+    }
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RememberedPane {
+    pane: tmux::PaneIdentity,
+    session: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RestoreEntry {
+    pub id: String,
+    pub title: String,
+    pub cwd: String,
+    pub status: RestoreStatus,
+}
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", content = "reason", rename_all = "snake_case")]
+pub enum RestoreStatus {
+    Ready,
+    Open,
+    Skipped(String),
+}
+
+/// Separate selection policy from filesystem/presence validation for offline tests.
+fn restore_entries(
+    catalog: &Catalog,
+    project: Option<&str>,
+    mut validate: impl FnMut(&Session) -> Result<()>,
+) -> Vec<RestoreEntry> {
+    catalog
+        .sessions
+        .iter()
+        .filter(|s| {
+            s.persistent()
+                && s.state == ResumeState::Resume
+                && project.is_none_or(|cwd| cwd == s.metadata.cwd)
+        })
+        .map(|s| RestoreEntry {
+            id: s.id.clone(),
+            title: s.metadata.title(),
+            cwd: s.metadata.cwd.clone(),
+            status: if !s.bindings.is_empty() || !s.probable.is_empty() {
+                RestoreStatus::Open
+            } else {
+                match validate(s) {
+                    Ok(()) => RestoreStatus::Ready,
+                    Err(e) => RestoreStatus::Skipped(paths::line(&format!("{e:#}"))),
+                }
+            },
+        })
+        .collect()
+}
+
 /// Identity verification and screen activity are independent. Capture ALL
 /// known agent panes, including verified Pi openings, without keeping text.
 fn attach_activity(
@@ -672,7 +864,7 @@ fn project_source(cwd: &Path) -> Option<PathBuf> {
     path.is_dir().then_some(path)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ResumeSpec {
     pub file: PathBuf,
     pub provider: Provider,
@@ -699,6 +891,15 @@ impl ResumeSpec {
         }
     }
     pub fn launch(&self) -> Result<()> {
+        self.validate_launch()?;
+        crate::tmux::resume_command(&self.argv(), Path::new(&self.cwd), &self.title)
+    }
+    /// Bulk restore must never attach or switch any existing client's terminal.
+    pub fn launch_detached(&self) -> Result<tmux::DetachedOpening> {
+        self.validate_launch()?;
+        crate::tmux::resume_command_detached(&self.argv(), Path::new(&self.cwd), &self.title)
+    }
+    pub(crate) fn validate_launch(&self) -> Result<()> {
         let identity = if self.provider == Provider::Opencode {
             opencode::identity(&self.file, &self.native_id)?
         } else {
@@ -716,7 +917,7 @@ impl ResumeSpec {
             Path::new(&self.cwd).is_dir(),
             "project directory is unavailable"
         );
-        crate::tmux::resume_command(&self.argv(), Path::new(&self.cwd), &self.title)
+        Ok(())
     }
     #[cfg(test)]
     fn launch_program(&self, program: &std::ffi::OsStr) -> Result<()> {
@@ -800,6 +1001,127 @@ mod tests {
             probable: vec![],
         }
     }
+    #[test]
+    fn explicit_terminal_assignment_keeps_the_r_badge_and_expires_on_identity_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("state");
+        let store = Store::open(&root).unwrap();
+        store.add_source(Path::new("/fixtures")).unwrap();
+        let source = store.sources().unwrap().remove(0);
+        for (native, name) in [("chosen", "chosen chat"), ("title-hint", "release-notes")] {
+            let mut cursor = pi::Cursor::default();
+            cursor.metadata.native_id = native.into();
+            cursor.metadata.name = name.into();
+            cursor.metadata.cwd = "/repo/project".into();
+            cursor.metadata.file = format!("/fixtures/{native}.jsonl").into();
+            store.ingest(&source, &cursor).unwrap();
+        }
+        let selected = store.resolve("chosen").unwrap();
+        store
+            .change(&selected.id, Some(ResumeState::Resume), None)
+            .unwrap();
+        let opening = pane("π - release-notes - project");
+        store
+            .set_preference(
+                "workspace-binding:fixture",
+                &serde_json::to_string(&RememberedPane {
+                    pane: opening.clone(),
+                    session: selected.id.clone(),
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let service = Service {
+            root,
+            store,
+            activity: Default::default(),
+            activity_started: std::time::Instant::now(),
+        };
+        let mut sessions = service.store.list().unwrap();
+        associate_probable(&mut sessions, std::slice::from_ref(&opening));
+        service
+            .associate_remembered(&mut sessions, std::slice::from_ref(&opening))
+            .unwrap();
+        append_live_panes(&mut sessions, std::slice::from_ref(&opening));
+        assert_eq!(
+            sessions.len(),
+            2,
+            "the live row must become the chosen saved row, not a duplicate"
+        );
+        let chosen = sessions.iter().find(|s| s.id == selected.id).unwrap();
+        assert_eq!(chosen.state, ResumeState::Resume);
+        assert_eq!(chosen.probable.len(), 1);
+        assert!(
+            sessions
+                .iter()
+                .find(|s| s.metadata.native_id == "title-hint")
+                .unwrap()
+                .probable
+                .is_empty()
+        );
+        assert_eq!(
+            service
+                .workspace_bindings(&Catalog {
+                    sessions: sessions.clone(),
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        let mut changed = opening;
+        changed.client_start = "new process".into();
+        associate_probable(&mut sessions, std::slice::from_ref(&changed));
+        service
+            .associate_remembered(&mut sessions, &[changed])
+            .unwrap();
+        assert!(
+            sessions
+                .iter()
+                .find(|s| s.id == selected.id)
+                .unwrap()
+                .probable
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn restore_selects_only_explicit_persistent_decisions_and_skips_openings() {
+        let mut ready = session();
+        ready.state = ResumeState::Resume;
+        let mut history = ready.clone();
+        history.id = "history".into();
+        history.state = ResumeState::History;
+        let mut done = ready.clone();
+        done.id = "done".into();
+        done.state = ResumeState::Done;
+        let mut live = ready.clone();
+        live.id = "pane-temporary".into();
+        let mut open = ready.clone();
+        open.id = "open".into();
+        open.probable.push(pane("pi:c"));
+        let mut missing = ready.clone();
+        missing.id = "missing".into();
+        missing.available = false;
+        let catalog = Catalog {
+            sessions: vec![ready, history, done, live, open, missing],
+            ..Default::default()
+        };
+        let plan = restore_entries(&catalog, None, |s| {
+            ensure!(s.available, "transcript unavailable");
+            Ok(())
+        });
+        assert_eq!(plan.len(), 3);
+        assert_eq!(plan[0].status, RestoreStatus::Ready);
+        assert_eq!(plan[1].status, RestoreStatus::Open);
+        assert_eq!(
+            plan[2].status,
+            RestoreStatus::Skipped("transcript unavailable".into())
+        );
+        assert!(restore_entries(&catalog, Some("/other/project"), |_| Ok(())).is_empty());
+        assert_eq!(catalog.sessions[0].state, ResumeState::Resume);
+    }
+
     #[test]
     fn non_pi_panes_stay_visible_while_pi_only_paths_ignore_them() {
         // attach_activity shells out to tmux, so test the widening rule
@@ -1085,6 +1407,12 @@ mod tests {
         };
         assert!(
             spec.launch()
+                .unwrap_err()
+                .to_string()
+                .contains("session identity changed")
+        );
+        assert!(
+            spec.launch_detached()
                 .unwrap_err()
                 .to_string()
                 .contains("session identity changed")

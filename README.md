@@ -60,6 +60,9 @@ The boundary is deliberate:
   argv to focus an existing pane or create a resume window.
 - **Durable work decisions:** History, To resume, Done, next-step notes, and undo
   in a private SQLite catalog, independent of transient terminal activity.
+- **Workspace checkpoints:** save session/window names and indexes, nested pane
+  geometry, sizes, cwd, active selections, zoom, and recoverable chat identities;
+  reconstruct them detached after tmux closes.
 
 ## Requirements
 
@@ -119,8 +122,14 @@ into conversation names.
 
 Live panes without a proven history association remain selectable **live
 terminal** rows, not invented conversations. They can be focused, but cannot
-carry durable notes or Done decisions. Duplicate identities are never resolved
-by arbitrary association.
+carry durable notes or Done decisions. Pressing `r` offers an explicit, searchable
+choice of saved chats from the same provider/project to mark To resume. Your
+explicit choice associates that exact terminal/process with the chosen chat, so
+its saved row replaces the anonymous terminal and shows `[R]`. This is a **user
+assignment**, not extension-proven identity. It expires on process/server/title
+changes; after an unreported `/resume` with an unchanged title, reassign it.
+Titles such as `pi:c` are never sufficient proof. Duplicate identities are never
+resolved by arbitrary association.
 
 ## TUI workflow
 
@@ -153,7 +162,7 @@ Search for a provider or activity word to find matching session rows.
 | `E` / `C` | Expand / collapse all, switching to Tree if needed |
 | `v` / `s` | Tree/flat layout / alphabetical/recent ordering |
 | `/`, `Ctrl-f`, search-bar click | Search the active panel |
-| `r` / `d` | Mark To resume / Done |
+| `r` / `d` | Mark To resume (choose a saved chat for unidentified terminals) / Done |
 | `n` / `u` | Edit next-step note / undo |
 | `a` / `A` | Toggle selected session alerts / all desktop alerts |
 | `o` / `i` | Open panes / project or session Details |
@@ -315,6 +324,90 @@ Desktop delivery runs on a separate bounded thread so a slow notification helper
 cannot stall input or rendering. A full queue drops alerts with a diagnostic,
 not an unbounded backlog.
 
+## Recover the tmux workspace after it closes
+
+**`restore` reconstructs a workspace checkpoint, not just a list of chats.**
+The running TUI observes tmux read-only and checkpoints topology every ten
+seconds when it changes. Save explicitly **before closing tmux** for a final
+checkpoint (no agent or pane is touched). The examples use `monitor`, an optional
+user alias/symlink for `tmux-agent-monitor`; the full binary name works too:
+
+```sh
+monitor snapshot                         # or tmux-agent-monitor snapshot
+monitor snapshot --list                  # retained checkpoint paths
+monitor restore                          # preview only; starts nothing
+monitor restore --json                   # topology plus recovery blockers
+monitor restore --resume                 # reconstruct in detached sessions
+monitor restore --snapshot /path/to/checkpoint.json --resume
+```
+
+A checkpoint preserves original socket/session names, window names/order/index
+numbers (including gaps), pane indexes, nested horizontal/vertical splits,
+exact cell dimensions, cwd, pane titles, active window/pane and zoom state.
+Chat panes resume their same stored conversations in those positions; shell
+panes reopen login shells in their original directories. The final geometry
+and zoom state are checked against tmux, not merely assumed. Internal tmux IDs
+necessarily change; no client is automatically attached or switched.
+
+**Identity must be known before tmux disappears.** For anonymous live terminals,
+press lowercase `r`, search/select the correct saved chat and confirm. This
+persists an exact-process user assignment and displays `[R]`; uppercase `R`
+only refreshes. Alternatively:
+
+```sh
+monitor sessions --all --json
+monitor snapshot --bind '%104=catalog-id' --bind '%112=another-catalog-id'
+# With multiple servers: --bind '/absolute/socket:%104=catalog-id'
+```
+
+The optional Pi identity integration is stronger, especially across `/resume`
+inside one process. Title/cwd-only matches are labeled and block restoration
+unless explicitly authorized with `restore --allow-probable --resume`.
+Never choose a different chat merely to remove a blocker.
+
+**No misleading "everything recovered" fallback.** Missing transcripts/cwd,
+unidentified or unsaved agents, uncertain external presence and existing
+session names block full restoration **before anything is created**. Existing
+sessions are never merged into, overwritten or closed. `--layout-only --resume`
+is an explicit alternative that restores geometry with empty shells, not chats.
+Grouped sessions, linked windows and nonstandard pane-index/layout ordering are
+currently rejected rather than reconstructed incorrectly.
+
+Original non-agent **tmux launch strings** can be replayed only with the separate
+`--commands` authorization; previews show those strings. Manually typed
+foreground jobs without a recoverable launch string are reported as unresolved.
+Process memory, unsent text, shell history, terminal scrollback, server/client
+connections, environment variables and arbitrary in-flight jobs cannot be
+recreated "exactly as before". Agent-specific launch flags/sandbox wrappers and
+runtime settings are not reconstructed; saved chats use the documented resume
+argv. Global tmux configuration is still supplied by your normal tmux config.
+Exact dimensions require a compatible terminal size and tmux configuration.
+
+Recovery first creates detached, inert placeholders, reconstructs the complete
+layout, then starts authorized content. `respawn-pane -k` is permitted **only**
+for a placeholder created in that invocation, after checking server/pane/PID and
+its `sleep` process. No existing process is replaced. A mid-recovery error leaves
+a private created-object journal and reports an incomplete restore; there is no
+risky rollback or silent retry into partially restored sessions. Avoid concurrent
+restores or external agent starts: provider process creation is not atomic.
+
+Checkpoints are atomic owner-only JSON files under the monitor data directory's
+`workspace/`. A per-data-directory lock serializes saves and recovery and prevents
+auto-checkpointing temporary recovery placeholders. The latest nonempty
+checkpoint and up to twenty changed versions
+are retained. Empty or failed discovery never erases the last checkpoint. If
+sessions were closed gradually, use `snapshot --list` and choose an older full
+checkpoint. They contain paths, titles and original launch strings (potentially
+sensitive); no captured screen/transcript text or process environment is saved.
+
+### Restore only the marked chat list (without geometry)
+
+The separate `restore --marked` mode previews the durable **To resume** list;
+`restore --marked --resume` reopens ready chats in fresh detached windows,
+without claiming to preserve the old topology. `--project /full/path` is
+available only with `--marked`. Existing/probable openings and uncertain sessions
+are skipped. History/Done chats are excluded, and decisions remain unchanged.
+
 ## Optional Pi identity verification
 
 Live detection works without plugins. Pi title/cwd matching provides probable
@@ -346,7 +439,9 @@ ordered and acknowledged.
 - **Private local state.** `sessions.db` uses owner-only storage: directory
   `0700`, database `0600`; unsafe symlinks and permissions are rejected.
 - **Explicit terminal actions.** Discovery uses listing and capture commands.
-  No `send-keys`, pane closure, tmux configuration edits, or implicit launches.
+  No `send-keys`, existing-pane closure, global tmux configuration edits, or implicit
+  agent launches. Authorized workspace recovery sets options only on its newly
+  created sessions/windows and replaces only its own validated placeholders.
 - **No runtime remote requests.** No telemetry, transcript uploads, credential
   reads, or remote detection manifests.
 - **Safe display.** ANSI, control, and bidi-spoofing sequences are stripped.

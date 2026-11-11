@@ -9,7 +9,7 @@
 │ │   Find         │   Focus live terminal                          [Enter]  │ │
 │ │ ▸ Session      │ › – Edit next-step note                            [n]  │ │
 │ │   Folders      │   – Mark Done                                      [d]  │ │
-│ │   Navigate     │   – Mark To resume                                 [r]  │ │
+│ │   Navigate     │   Mark To resume                                   [r]  │ │
 │ │   Catalog      │   – Undo last change                               [u]  │ │
 │ │   Notifications│   Details                                          [i]  │ │
 │ │                │                                                         │ │

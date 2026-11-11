@@ -13,7 +13,7 @@
 ╭ All · 5 ─────────│   Find         │   Focus live terminal                                [Enter]  │                  │
 │› [claude][R][N] l│ ▸ Session      │ › – Edit next-step note                                  [n]  │                  │
 │  [pi][R][N] Acme │   Folders      │   – Mark Done                                            [d]  │                  │
-│  [pi][R][N] Acme │   Navigate     │   – Mark To resume                                       [r]  │                  │
+│  [pi][R][N] Acme │   Navigate     │   Mark To resume                                         [r]  │                  │
 │  [pi][R][N] Acme │   Catalog      │   – Undo last change                                     [u]  │                  │
 │  [pi][R][N] Acme │   Notifications│   Details                                                [i]  │                  │
 │                  │                │                                                               │                  │

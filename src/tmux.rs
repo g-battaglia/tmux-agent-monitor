@@ -399,7 +399,7 @@ pub fn focus_probable(identity: &PaneIdentity) -> Result<()> {
     );
     focus(identity, &config)
 }
-fn same_hint(current: &PaneIdentity, selected: &PaneIdentity) -> bool {
+pub(crate) fn same_hint(current: &PaneIdentity, selected: &PaneIdentity) -> bool {
     socket_key(&current.socket) == socket_key(&selected.socket)
         && current.server == selected.server
         && current.pane == selected.pane
@@ -462,12 +462,34 @@ pub fn resume(file: &Path, cwd: &Path, title: &str) -> Result<()> {
     let file = file.to_str().context("session path is not UTF-8")?;
     resume_command(&["pi".into(), "--session".into(), file.into()], cwd, title)
 }
-pub fn resume_command(argv: &[String], cwd: &Path, title: &str) -> Result<()> {
-    let socket = std::env::var("TMUX").ok().and_then(|v| {
+fn current_socket() -> Option<String> {
+    std::env::var("TMUX").ok().and_then(|v| {
         v.rsplit_once(',')
             .and_then(|(v, _)| v.rsplit_once(','))
             .map(|(s, _)| s.to_owned())
-    });
+    })
+}
+
+/// Create a detached opening and return its exact identity. Deliberately omits
+/// the monitor pane: bulk recovery cannot attach or move any tmux client.
+pub fn resume_command_detached(
+    argv: &[String],
+    cwd: &Path,
+    title: &str,
+) -> Result<DetachedOpening> {
+    resume_command_with(
+        std::ffi::OsStr::new("tmux"),
+        current_socket().as_deref(),
+        None,
+        argv,
+        cwd,
+        title,
+    )?
+    .context("tmux did not report the detached session")
+}
+
+pub fn resume_command(argv: &[String], cwd: &Path, title: &str) -> Result<()> {
+    let socket = current_socket();
     let monitor = std::env::var("TMUX_PANE").ok();
     let opened = resume_command_with(
         std::ffi::OsStr::new("tmux"),
@@ -477,7 +499,8 @@ pub fn resume_command(argv: &[String], cwd: &Path, title: &str) -> Result<()> {
         cwd,
         title,
     )?;
-    if let Some(target) = opened {
+    if let Some(opening) = opened {
+        let target = opening.session;
         use std::io::IsTerminal;
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             println!(
@@ -504,7 +527,7 @@ fn resume_with(
     cwd: &Path,
     title: &str,
 ) -> Result<Option<String>> {
-    resume_command_with(
+    Ok(resume_command_with(
         program,
         socket,
         monitor,
@@ -515,8 +538,27 @@ fn resume_with(
         ],
         cwd,
         title,
-    )
+    )?
+    .map(|opening| opening.session))
 }
+
+/// Identity returned by our own create command. tmux pane ids do not repeat
+/// within the same server lifetime. Never infer ownership from a title/cwd.
+#[derive(Debug)]
+pub struct DetachedOpening {
+    pub session: String,
+    pane: String,
+    socket: String,
+    server: String,
+}
+impl DetachedOpening {
+    pub fn owns(&self, pane: &PaneIdentity) -> bool {
+        self.pane == pane.pane
+            && self.server == pane.server
+            && socket_key(&self.socket) == socket_key(&pane.socket)
+    }
+}
+
 fn resume_command_with(
     program: &std::ffi::OsStr,
     socket: Option<&str>,
@@ -524,7 +566,7 @@ fn resume_command_with(
     argv: &[String],
     cwd: &Path,
     title: &str,
-) -> Result<Option<String>> {
+) -> Result<Option<DetachedOpening>> {
     ensure!(!argv.is_empty(), "missing agent command");
     let run = |args: &[&str]| -> Result<String> {
         let mut command = Command::new(program);
@@ -597,7 +639,7 @@ fn resume_command_with(
             "-d",
             "-P",
             "-F",
-            "#{pane_id}\t#{session_id}",
+            "#{pane_id}\t#{session_id}\t#{socket_path}\t#{pid}:#{start_time}",
             "-t",
             target.as_deref().unwrap(),
             "-n",
@@ -611,7 +653,7 @@ fn resume_command_with(
             "-d",
             "-P",
             "-F",
-            "#{pane_id}\t#{session_id}",
+            "#{pane_id}\t#{session_id}\t#{socket_path}\t#{pid}:#{start_time}",
             "-s",
             &unique,
             "-n",
@@ -622,16 +664,23 @@ fn resume_command_with(
     };
     args.extend(argv.iter().map(String::as_str));
     let output = run(&args)?;
-    let (pane, session) = output
-        .trim()
-        .split_once('\t')
-        .context("tmux did not report the new opening")?;
+    let fields = output.trim().split('\t').collect::<Vec<_>>();
+    ensure!(
+        fields.len() == 4 && fields.iter().all(|f| !f.is_empty()),
+        "tmux did not report the new opening"
+    );
+    let (pane, session) = (fields[0], fields[1]);
     if let Some(client) = client {
         run(&["switch-client", "-c", &client, "-t", pane])?;
         run(&["select-pane", "-t", pane])?;
         Ok(None)
     } else {
-        Ok(Some(session.to_owned()))
+        Ok(Some(DetachedOpening {
+            session: session.to_owned(),
+            pane: pane.to_owned(),
+            socket: fields[2].to_owned(),
+            server: fields[3].to_owned(),
+        }))
     }
 }
 
@@ -682,6 +731,22 @@ mod tests {
             activity_evidence: None,
         };
         assert!(same_hint(&pane, &pane));
+        let owned = DetachedOpening {
+            session: "$1".into(),
+            pane: pane.pane.clone(),
+            socket: pane.socket.clone(),
+            server: pane.server.clone(),
+        };
+        assert!(owned.owns(&pane));
+        for field in ["pane", "socket", "server"] {
+            let mut foreign = pane.clone();
+            match field {
+                "pane" => foreign.pane = "%different".into(),
+                "socket" => foreign.socket = "/other/socket".into(),
+                _ => foreign.server = "restarted-server".into(),
+            }
+            assert!(!owned.owns(&foreign));
+        }
         for provider in [Provider::Claude, Provider::Codex, Provider::Opencode] {
             let mut other = pane.clone();
             other.provider = Some(provider);
@@ -816,7 +881,7 @@ with (root/'log').open('a') as file: file.write(json.dumps(args)+'\n')
 if args[0]=='list-panes':
     if (root/'panes').exists(): print((root/'panes').read_text(),end='')
     else: sys.exit(1)
-elif args[0] in ('new-session','new-window'): print('%99\t$9')
+elif args[0] in ('new-session','new-window'): print('%99\t$9\t/fake/socket\t1:1234')
 elif args[0]=='display-message': print('monitor')
 elif args[0]=='list-clients': print((root/'clients').read_text(),end='')
 elif args[0] in ('switch-client','select-pane'): pass

@@ -28,6 +28,13 @@ enum Dialog {
         id: String,
         text: String,
     },
+    /// Explicit user choice, not inferred proof of a terminal's identity.
+    SaveConversation {
+        pane: Box<crate::tmux::PaneIdentity>,
+        candidates: Vec<Session>,
+        search: String,
+        row: usize,
+    },
     Views(usize),
     Projects(usize),
     Openings(Vec<Binding>, usize),
@@ -62,6 +69,7 @@ impl Runtime {
         let writing = matches!(
             action,
             Action::Change { .. }
+                | Action::Remember { .. }
                 | Action::Undo(_)
                 | Action::SetNotifications(_)
                 | Action::SetSessionNotifications { .. }
@@ -72,6 +80,50 @@ impl Runtime {
             self.app.status = "Saving…".into();
         }
     }
+    /// A terminal title (for example `pi:c`) cannot identify a transcript.
+    /// Offer same-provider/project history, but never choose on the user's behalf.
+    fn choose_conversation_to_save(&mut self) {
+        let Some(terminal) = self.app.current() else {
+            return;
+        };
+        if !terminal.bindings.is_empty() {
+            self.app.status = "Pi has not saved this conversation yet. Wait for its transcript; --no-session chats cannot be restored.".into();
+            return;
+        }
+        let mut candidates = self
+            .app
+            .catalog
+            .sessions
+            .iter()
+            .filter(|s| {
+                s.persistent()
+                    && s.available
+                    && s.metadata.provider == terminal.metadata.provider
+                    && s.metadata.cwd == terminal.metadata.cwd
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        candidates.sort_by(|a, b| {
+            b.metadata
+                .updated
+                .cmp(&a.metadata.updated)
+                .then(a.id.cmp(&b.id))
+        });
+        if candidates.is_empty() {
+            self.app.status = "No saved conversation for this terminal's provider/project. Refresh history; for Pi, install the identity integration and /reload when convenient.".into();
+        } else {
+            let Some(pane) = terminal.probable.first() else {
+                return;
+            };
+            self.dialog = Some(Dialog::SaveConversation {
+                pane: Box::new(pane.clone()),
+                candidates,
+                search: String::new(),
+                row: 0,
+            });
+        }
+    }
+
     /// Request the detail page for the current selection, if stale.
     /// Latest-wins: only the newest generation is ever rendered, so fast
     /// scrolling never shows an older conversation under a newer row.
@@ -247,7 +299,11 @@ impl Runtime {
                 .current()
                 .is_some_and(|s| s.id.starts_with("pane-") || s.id.starts_with("live-"))
         {
-            self.app.status = "Saved session identity required for notes and decisions; Enter focuses this terminal.".into();
+            if key.code == KeyCode::Char('r') {
+                self.choose_conversation_to_save();
+            } else {
+                self.app.status = "Saved session identity required for notes and decisions; r lets you choose a saved conversation, Enter focuses this terminal.".into();
+            }
             return false;
         }
         if self.app.panel == Panel::Projects {
@@ -431,6 +487,16 @@ impl Runtime {
             }
             KeyCode::Char('d') | KeyCode::Char('r') => {
                 if let Some(s) = self.app.current() {
+                    if key.code == KeyCode::Char('r')
+                        && s.bindings.is_empty()
+                        && s.probable.len() == 1
+                    {
+                        self.action(Action::Remember {
+                            id: s.id.clone(),
+                            pane: Box::new(s.probable[0].clone()),
+                        });
+                        return false;
+                    }
                     self.action(Action::Change {
                         id: s.id.clone(),
                         state: Some(if key.code == KeyCode::Char('d') {
@@ -607,6 +673,52 @@ impl Runtime {
                     true
                 }
             }
+            Dialog::SaveConversation {
+                pane,
+                candidates,
+                search,
+                row,
+            } => {
+                // Letters search (including j/k); arrows navigate this picker.
+                let movement = match key.code {
+                    KeyCode::Down => 1,
+                    KeyCode::Up => -1,
+                    _ => 0,
+                };
+                match key.code {
+                    KeyCode::Backspace => {
+                        search.pop();
+                        *row = 0;
+                    }
+                    KeyCode::Char(c)
+                        if (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT)
+                            && search.chars().count() < 256 =>
+                    {
+                        search.push(c);
+                        *row = 0;
+                    }
+                    _ => {}
+                }
+                let filtered = saved_choices(candidates, search);
+                *row = (*row as isize + movement)
+                    .clamp(0, filtered.len().saturating_sub(1) as isize)
+                    as usize;
+                if accepted {
+                    if let Some(session) = filtered.get(*row) {
+                        // Freeze the catalog id; a refresh or selection change cannot
+                        // redirect this decision to a different conversation.
+                        self.action(Action::Remember {
+                            id: session.id.clone(),
+                            pane: pane.clone(),
+                        });
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                }
+            }
             Dialog::Views(row) => {
                 *row = (*row as isize + delta).clamp(0, 3) as usize;
                 if accepted {
@@ -755,6 +867,13 @@ impl Runtime {
                 .take(4000 - note.chars().count().min(4000))
                 .collect::<String>();
             note.push_str(&paths::clean(&clipped));
+        } else if let Some(Dialog::SaveConversation { search, row, .. }) = &mut self.dialog {
+            let clipped = text
+                .chars()
+                .take(256 - search.chars().count().min(256))
+                .collect::<String>();
+            search.push_str(&paths::line(&clipped));
+            *row = 0;
         } else if self.app.editing_search {
             let search = self.app.search_text_mut();
             let clipped = text
@@ -793,6 +912,7 @@ impl Runtime {
             Dialog::Note { text, .. } => {
                 format!("Next step\n\n{text}▏\n\nEnter saves · Esc cancels")
             }
+            Dialog::SaveConversation { candidates, search, row, .. } => saved_choice_dialog(candidates, search, *row),
             Dialog::Views(row) => picker(
                 "Show",
                 View::ALL.iter().map(|v| v.label().to_string()).collect(),
@@ -856,6 +976,46 @@ impl Runtime {
         self.app.modal = text.filter(|text| !text.is_empty());
     }
 }
+/// Search frozen candidates so background refreshes cannot reorder a choice.
+fn saved_choices<'a>(candidates: &'a [Session], search: &str) -> Vec<&'a Session> {
+    let search = search.to_lowercase();
+    candidates
+        .iter()
+        .filter(|s| {
+            format!("{} {} {}", s.metadata.title(), s.id, s.metadata.native_id)
+                .to_lowercase()
+                .contains(&search)
+        })
+        .collect()
+}
+
+/// The save dialog must keep the CURRENT choice visible even on a 40x12
+/// terminal. A long warning plus an eight-row list used to clip that choice.
+fn saved_choice_dialog(candidates: &[Session], search: &str, row: usize) -> String {
+    let filtered = saved_choices(candidates, search);
+    let choice = filtered.get(row);
+    let title = choice
+        .map(|s| render::clipped(&s.metadata.title(), 64))
+        .unwrap_or_else(|| "No matching saved chats".into());
+    let identity = choice
+        .map(|s| {
+            format!(
+                "{} [{}]",
+                paths::date(s.metadata.updated),
+                s.id.chars().take(8).collect::<String>()
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "Choose saved chat {}/{}\nSearch: {}▏\n› {}\n{}\n↑↓ choose · Enter saves · Esc cancels\nUser assignment; no agent touched.",
+        if choice.is_some() { row + 1 } else { 0 },
+        filtered.len(),
+        render::clipped(search, 24),
+        title,
+        identity
+    )
+}
+
 fn picker(title: &str, items: Vec<String>, row: usize) -> String {
     let start = row.saturating_sub(7);
     format!(
@@ -1133,6 +1293,133 @@ mod tests {
             probable: vec![],
         }
     }
+    #[test]
+    fn live_resume_requires_an_explicit_searchable_saved_chat_choice() {
+        let mut runtime = fixture();
+        let (actions, requests) = std::sync::mpsc::sync_channel(16);
+        runtime.worker.actions = actions;
+        let live = open_terminal("pane-live", "/repo/project");
+        let mut saved = session("saved-choice");
+        saved.state = ResumeState::History;
+        saved.metadata.cwd = "/repo/project".into();
+        let mut other_project = saved.clone();
+        other_project.id = "other-project".into();
+        other_project.metadata.cwd = "/elsewhere".into();
+        let mut other_provider = saved.clone();
+        other_provider.id = "other-provider".into();
+        other_provider.metadata.provider = Provider::Codex;
+        runtime.app.apply(Catalog {
+            sessions: vec![live, saved, other_project, other_provider],
+            ..Default::default()
+        });
+        runtime.app.selected = Some("pane-live".into());
+        runtime.key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), 24);
+        assert!(
+            requests.try_recv().is_err(),
+            "r must not guess a conversation"
+        );
+        assert!(
+            matches!(&runtime.dialog, Some(Dialog::SaveConversation { candidates, .. }) if candidates.len() == 1 && candidates[0].id == "saved-choice")
+        );
+        runtime.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 24);
+        assert!(requests.try_recv().is_err());
+        runtime.key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), 24);
+        runtime.paste("saved-choice".into());
+        // Refreshing/reselecting while the picker is open cannot retarget it.
+        runtime.app.selected = Some("other-project".into());
+        runtime.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 24);
+        assert!(
+            matches!(requests.try_recv().unwrap(), Action::Remember { id, .. } if id == "saved-choice")
+        );
+        assert_eq!(
+            runtime
+                .app
+                .catalog
+                .sessions
+                .iter()
+                .find(|s| s.id == "saved-choice")
+                .unwrap()
+                .state,
+            ResumeState::History
+        );
+    }
+
+    #[test]
+    fn save_picker_keeps_late_choices_visible_in_small_terminals() {
+        for (width, height) in [(40, 12), (80, 24)] {
+            let mut runtime = fixture();
+            let terminal = open_terminal("pane-live", "/repo/project");
+            let candidates = (0..12)
+                .map(|i| session(&format!("candidate{i:02}")))
+                .collect();
+            runtime.dialog = Some(Dialog::SaveConversation {
+                pane: Box::new(terminal.probable[0].clone()),
+                candidates,
+                search: String::new(),
+                row: 9,
+            });
+            runtime.modal();
+            let mut screen =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            screen
+                .draw(|frame| render::draw(frame, &runtime.app))
+                .unwrap();
+            let text = screen
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>();
+            assert!(
+                text.contains("candidate09"),
+                "current choice was clipped at {width}x{height}"
+            );
+            assert!(text.contains("10/12"));
+            assert!(text.contains("Enter saves"));
+        }
+    }
+
+    #[test]
+    fn r_can_confirm_the_terminal_association_of_an_already_marked_chat() {
+        let mut runtime = fixture();
+        let (actions, requests) = std::sync::mpsc::sync_channel(16);
+        runtime.worker.actions = actions;
+        let mut saved = session("already-marked");
+        saved.probable = open_terminal("pane-live", "/repo/project").probable;
+        runtime.app.apply(Catalog {
+            sessions: vec![saved],
+            ..Default::default()
+        });
+        let menu = super::super::menu::CommandMenu::new(&runtime.app);
+        assert!(
+            menu.actions
+                .iter()
+                .find(|a| a.key == KeyCode::Char('r'))
+                .unwrap()
+                .enabled
+        );
+        runtime.key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), 24);
+        assert!(
+            matches!(requests.try_recv().unwrap(), Action::Remember { id, .. } if id == "already-marked")
+        );
+    }
+
+    #[test]
+    fn live_resume_with_no_transcript_does_not_queue_a_write() {
+        let mut runtime = fixture();
+        let (actions, requests) = std::sync::mpsc::sync_channel(16);
+        runtime.worker.actions = actions;
+        runtime.app.apply(Catalog {
+            sessions: vec![open_terminal("pane-live", "/repo/project")],
+            ..Default::default()
+        });
+        runtime.key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), 24);
+        assert!(runtime.dialog.is_none());
+        assert!(runtime.app.status.contains("No saved conversation"));
+        assert!(requests.try_recv().is_err());
+    }
+
     #[test]
     fn alert_shortcuts_freeze_targets_and_do_not_optimistically_change_state() {
         let mut runtime = fixture();
